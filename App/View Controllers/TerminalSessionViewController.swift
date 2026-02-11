@@ -451,21 +451,9 @@ class TerminalSessionViewController: BaseTerminalSplitViewControllerChild {
                 // SwiftTerm lines in `refresh` are typically the visible ones.
                 // Assuming `lines` array matches `rowIndex`.
                 
-                // We can't easily convert BufferLine to string without helper, 
-                // but let's try to get it from terminal model if possible.
-                // Or reconstruct from CharData
-                // Since we made terminal public, we can use it.
-                // Be careful about index mapping. `lines` in refresh usually starts from 0 to display height.
-                
                 // Let's use the local lines variable which we refreshed.
                 if rowIndex < lines.count {
-                    let line = lines[rowIndex]
-                    // SwiftTerm's BufferLine to String:
-                    // There is no public helper on BufferLine to get String directly in the snippet provided?
-                    // Terminal.getLine(row) returns a BufferLine.
-                    // Let's iterate manually or try a method if available.
-                    // Looking at SwiftTerm docs, `translateToString` might be available on BufferLine or we use `terminal.getLine(row)`.
-                    
+                    let _ = lines[rowIndex]
                     // Fallback to a simple extraction if possible, or use terminal helper
                     // Note: terminal.getLine(row) expects absolute row index if I recall correctly, or relative.
                     // Since we have `lines` cached which are just data, we need a way to interpret them.
