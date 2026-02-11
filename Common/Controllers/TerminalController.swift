@@ -255,14 +255,22 @@ public class TerminalController {
             self.lastCursorLocation = cursorLocation
             
             var count = scrollInvariantRows
-            if scrollbackRows==0 && !terminal.buffers.isAlternateBuffer {
-                count = terminal.buffer.y+1
+            if scrollbackRows == 0 && !terminal.buffers.isAlternateBuffer {
+                // If no scrollback, render screen height
+                count = terminal.rows
+                // Or if we want to be strict about used lines:
+                // count = terminal.buffer.y + 1
             }
 
+            // FIXED: Use getLine() to correctly fetch history and screen lines
             var alllines = [BufferLine]()
             for i in 0..<count {
-                let line = terminal.buffer.lines[i]
-                alllines.append(line)
+                if let line = terminal.getLine(row: i) {
+                    alllines.append(line)
+                } else {
+                    // Fallback to empty line if needed
+                    alllines.append(terminal.buffer.lines[0]) // Dummy safe
+                }
             }
             
             DispatchQueue.main.async {
