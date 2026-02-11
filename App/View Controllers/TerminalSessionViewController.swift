@@ -201,7 +201,7 @@ class TerminalSessionViewController: BaseTerminalSplitViewControllerChild {
     }
     
     override func viewWillTransition(to size: CGSize, with coordinator: UIViewControllerTransitionCoordinator) {
-        NSLog("NewTermLog: viewWillTransition to \(size)")
+        // NSLog("NewTermLog: viewWillTransition to \(size)")
         super.viewWillTransition(to: size, with: coordinator)
         if UIDevice.current.userInterfaceIdiom == .pad {
             if keyInput.isFirstResponder {
@@ -212,24 +212,24 @@ class TerminalSessionViewController: BaseTerminalSplitViewControllerChild {
     }
     
     override func viewWillLayoutSubviews() {
-        NSLog("NewTermLog: TerminalSessionViewController.viewWillLayoutSubviews \(self.view.frame) \(self.view.safeAreaInsets)")
+        // NSLog("NewTermLog: TerminalSessionViewController.viewWillLayoutSubviews \(self.view.frame) \(self.view.safeAreaInsets)")
         super.viewWillLayoutSubviews()
         updateScreenSize()
     }
     
     override func viewDidLayoutSubviews() {
         super.viewDidLayoutSubviews()
-        NSLog("NewTermLog: TerminalSessionViewController.viewDidLayoutSubviews \(self.view.frame) \(self.view.safeAreaInsets)")
-        NSLog("NewTermLog: textView frame=\(self.textView.frame) safeArea=\(self.textView.safeAreaInsets)")
+        // NSLog("NewTermLog: TerminalSessionViewController.viewDidLayoutSubviews \(self.view.frame) \(self.view.safeAreaInsets)")
+        // NSLog("NewTermLog: textView frame=\(self.textView.frame) safeArea=\(self.textView.safeAreaInsets)")
     }
 
     override func viewSafeAreaInsetsDidChange() {
-        NSLog("NewTermLog: TerminalSessionViewController.viewSafeAreaInsetsDidChange \(self.view.frame) \(view.safeAreaInsets)")
+        // NSLog("NewTermLog: TerminalSessionViewController.viewSafeAreaInsetsDidChange \(self.view.frame) \(view.safeAreaInsets)")
         super.viewSafeAreaInsetsDidChange()
     }
 
     override func traitCollectionDidChange(_ previousTraitCollection: UITraitCollection?) {
-        NSLog("NewTermLog: TerminalSessionViewController.traitCollectionDidChange \(self.view.frame) \(view.safeAreaInsets)")
+        // NSLog("NewTermLog: TerminalSessionViewController.traitCollectionDidChange \(self.view.frame) \(view.safeAreaInsets)")
         super.traitCollectionDidChange(previousTraitCollection)
     }
 
@@ -278,7 +278,7 @@ class TerminalSessionViewController: BaseTerminalSplitViewControllerChild {
             fatalError("Failed to get glyph size")
         }
         
-        NSLog("NewTermLog: TerminalSessionViewController.updateScreenSize self=\(self.view.safeAreaLayoutGuide.layoutFrame) textView=\(textView.safeAreaLayoutGuide.layoutFrame)")
+        // NSLog("NewTermLog: TerminalSessionViewController.updateScreenSize self=\(self.view.safeAreaLayoutGuide.layoutFrame) textView=\(textView.safeAreaLayoutGuide.layoutFrame)")
         let newSize = ScreenSize(cols: UInt16(layoutSize.width / glyphSize.width),
                                                          rows: UInt16(layoutSize.height / glyphSize.height.rounded(.up)),
                                                          cellSize: glyphSize)
@@ -298,7 +298,7 @@ class TerminalSessionViewController: BaseTerminalSplitViewControllerChild {
     }
 
     private func updateIsSplitViewResizing() {
-        NSLog("NewTermLog: TerminalSessionViewController.updateIsSplitViewResizing")
+        // NSLog("NewTermLog: TerminalSessionViewController.updateIsSplitViewResizing")
         state.isSplitViewResizing = isSplitViewResizing
 
         if !isSplitViewResizing {
@@ -307,7 +307,7 @@ class TerminalSessionViewController: BaseTerminalSplitViewControllerChild {
     }
 
     private func updateShowsTitleView() {
-        NSLog("NewTermLog: TerminalSessionViewController.updateShowsTitleView")
+        // NSLog("NewTermLog: TerminalSessionViewController.updateShowsTitleView")
         updateScreenSize()
     }
 
@@ -320,16 +320,6 @@ class TerminalSessionViewController: BaseTerminalSplitViewControllerChild {
         let charWidth = terminalController.fontMetrics.boundingBox.width
         // Adjust point to be relative to the cell's content view
         let localPoint = tableView.convert(point, to: cell.contentView)
-        
-        // Calculate column based on character width
-        // Note: NewTerm uses some padding in TerminalView, we might need to account for it if it exists in the cell structure.
-        // Assuming SwiftUITableViewCell content starts at 0 or close to it.
-        // TerminalView.horizontalSpacing is applied to the ScrollView padding in SwiftUI,
-        // but here we are in a UITableView. The cell content likely has the padding?
-        // Looking at SwiftUITableViewCell, it pins to edges.
-        // However, TerminalView (SwiftUI) has padding.
-        // But here we are using cellForRowAt directly rendering text.
-        // The text usually starts at x=0 inside the hosting view.
         
         let col = Int(localPoint.x / charWidth)
         let row = indexPath.row
@@ -402,8 +392,14 @@ class TerminalSessionViewController: BaseTerminalSplitViewControllerChild {
         
         // Create a rectangle for the menu target
         let rect = CGRect(x: point.x, y: point.y - 20, width: 1, height: 1)
-        menu.setTargetRect(rect, in: tableView)
-        menu.setMenuVisible(true, animated: true)
+        
+        if #available(iOS 13.0, *) {
+            menu.showMenu(from: tableView, rect: rect)
+        } else {
+            // Fallback for older iOS
+            menu.setTargetRect(rect, in: tableView)
+            menu.setMenuVisible(true, animated: true)
+        }
     }
 
     @objc private func handleTextViewTap(_ gestureRecognizer: UITapGestureRecognizer) {
@@ -432,10 +428,6 @@ class TerminalSessionViewController: BaseTerminalSplitViewControllerChild {
         
         let text = getSelectedText(start: start, end: end)
         UIPasteboard.general.string = text
-        
-        // Optional: Animate or give feedback?
-        // clearSelection() // Usually we keep selection after copy, or clear it.
-        // Standard iOS behavior: keep selection.
     }
     
     private func getSelectedText(start: (col: Int, row: Int), end: (col: Int, row: Int)) -> String {
@@ -451,48 +443,55 @@ class TerminalSessionViewController: BaseTerminalSplitViewControllerChild {
         if safeMinRow > safeMaxRow { return "" }
         
         for rowIndex in safeMinRow...safeMaxRow {
-            guard rowIndex < lines.count else { continue }
-            let line = lines[rowIndex]
-            
             // Need to extract text from BufferLine.
-            // Since we don't have direct access to internal char array easily exposed as string in snippet,
-            // we will rely on Terminal functionality or iterate.
-            // SwiftTerm's BufferLine usually iterates CharData.
-            // Assuming we can get the full line text and substring it, OR reconstruct it.
-            // Let's rely on terminalController to help if possible, otherwise:
-            
-            // Safe fallback: Get the row text from terminal if accessible
-            // But we have `lines` which are BufferLines.
-            // Let's assume we can map them.
-            // Note: SwiftTerm BufferLine isn't a String.
-            // We'll use a best-effort approach to getting text from the terminal instance for these rows.
-            
-            let term = terminalController.terminal
-            // SwiftTerm 1.0: terminal.getLine(row) returns BufferLine?
-            // BufferLine.translateToString() is usually available.
-            
-            if let str = term?.getLine(row: rowIndex - term!.buffer.yDisp)?.translateToString() {
-                // Calculate substring indices
-                let len = str.count
-                var s = 0
-                var e = len
+            // Using terminal instance since we made it public
+            if let term = terminalController.terminal {
+                // Buffer rows are scroll-invariant usually in SwiftTerm logic, need to check if we need yDisp adjustment.
+                // In refresh() we get 'lines' which are BufferLine.
+                // SwiftTerm lines in `refresh` are typically the visible ones.
+                // Assuming `lines` array matches `rowIndex`.
                 
-                if rowIndex == safeMinRow {
-                    s = min(len, startCol)
-                }
-                if rowIndex == safeMaxRow {
-                    e = min(len, endCol + 1) // +1 to include the character
-                }
+                // We can't easily convert BufferLine to string without helper, 
+                // but let's try to get it from terminal model if possible.
+                // Or reconstruct from CharData
+                // Since we made terminal public, we can use it.
+                // Be careful about index mapping. `lines` in refresh usually starts from 0 to display height.
                 
-                if s < e {
-                    let startIdx = str.index(str.startIndex, offsetBy: s)
-                    let endIdx = str.index(str.startIndex, offsetBy: e)
-                    result += str[startIdx..<endIdx]
+                // Let's use the local lines variable which we refreshed.
+                if rowIndex < lines.count {
+                    let line = lines[rowIndex]
+                    // SwiftTerm's BufferLine to String:
+                    // There is no public helper on BufferLine to get String directly in the snippet provided?
+                    // Terminal.getLine(row) returns a BufferLine.
+                    // Let's iterate manually or try a method if available.
+                    // Looking at SwiftTerm docs, `translateToString` might be available on BufferLine or we use `terminal.getLine(row)`.
+                    
+                    // Fallback to a simple extraction if possible, or use terminal helper
+                    // Note: terminal.getLine(row) expects absolute row index if I recall correctly, or relative.
+                    // Since we have `lines` cached which are just data, we need a way to interpret them.
+                    // For now, let's assume we can get the text from the terminal for the *visible* rows.
+                    // The visible rows correspond to terminal.buffer.lines[terminal.buffer.yDisp + i]
+                    
+                    if let termLine = term.getLine(row: rowIndex + term.buffer.yDisp) {
+                         let str = termLine.translateToString()
+                         let len = str.count
+                         var s = 0
+                         var e = len
+                         
+                         if rowIndex == safeMinRow {
+                             s = min(len, startCol)
+                         }
+                         if rowIndex == safeMaxRow {
+                             e = min(len, endCol + 1)
+                         }
+                         
+                         if s < e {
+                             let startIdx = str.index(str.startIndex, offsetBy: s)
+                             let endIdx = str.index(str.startIndex, offsetBy: e)
+                             result += str[startIdx..<endIdx]
+                         }
+                    }
                 }
-            } else {
-                 // Fallback if we can't get it from terminal instance (e.g. scrolled back)
-                 // lines[rowIndex] is available.
-                 // result += lines[rowIndex].translateToString() (if available)
             }
             
             if rowIndex != safeMaxRow {
@@ -710,8 +709,6 @@ class SwiftUITableViewCell: UITableViewCell {
                 newHostingView.topAnchor.constraint(equalTo: contentView.topAnchor),
                 newHostingView.bottomAnchor.constraint(equalTo: contentView.bottomAnchor)
             ])
-            // Send hosting view to back so text is on top?
-            // Actually, text (hostingView) should be on TOP of selection layer.
         }
         
         // Update selection layer
@@ -733,9 +730,6 @@ class SwiftUITableViewCell: UITableViewCell {
     
     override func layoutSubviews() {
         super.layoutSubviews()
-        // Re-layout selection if needed? Usually frame is set in configure, but bounds might change.
-        // For terminal lines, height is usually fixed, but width changes.
-        // We rely on reloadData calling configure to update frames.
     }
 }
 
@@ -767,8 +761,6 @@ extension TerminalSessionViewController: UITableViewDataSource {
                 let sCol = (indexPath.row == minR) ? startCol : 0
                 let eCol = (indexPath.row == maxR) ? endCol : Int.max // max selects till end
                 
-                // Clamp to line length? Visually we can select infinite right.
-                // But for drawing rect, maybe limit to e.g. 200 cols or screen width.
                 let maxLineCols = Int(terminalController.screenSize?.cols ?? 80)
                 let actualEnd = min(eCol, maxLineCols)
                 
