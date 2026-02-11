@@ -144,7 +144,7 @@ class TerminalSessionViewController: BaseTerminalSplitViewControllerChild {
 
         title = .localize("TERMINAL", comment: "Generic title displayed before the terminal sets a proper title.")
 
-        preferencesUpdated()
+        // 修复：不要在这里调用 preferencesUpdated()，因为 tableView 还没初始化！
         
         tableView = UITableView()
         tableView.delegate = self
@@ -172,6 +172,9 @@ class TerminalSessionViewController: BaseTerminalSplitViewControllerChild {
         }
         keyInput.terminalInputDelegate = terminalController
         view.addSubview(keyInput)
+        
+        // 修复：初始化完 tableView 后再调用更新，防止崩溃
+        preferencesUpdated()
     }
 
     override func viewDidLoad() {
@@ -336,7 +339,7 @@ class TerminalSessionViewController: BaseTerminalSplitViewControllerChild {
         case .changed:
             // 长按移动时更新选区
             if let coord = getTerminalCoordinate(at: point) {
-                // 修复：分别比较属性，避免可选元组比较错误
+                // 修复编译错误：分别比较属性，避免可选元组比较错误
                 if selectionEnd?.col != coord.col || selectionEnd?.row != coord.row {
                     selectionEnd = coord
                     tableView.reloadData()
@@ -360,7 +363,7 @@ class TerminalSessionViewController: BaseTerminalSplitViewControllerChild {
                 // 自动滚动支持：如果拖到顶部或底部
                 handleAutoScroll(at: point)
                 
-                // 修复：分别比较属性，避免可选元组比较错误
+                // 修复编译错误：分别比较属性，避免可选元组比较错误
                 if selectionEnd?.col != coord.col || selectionEnd?.row != coord.row {
                     selectionEnd = coord
                     tableView.reloadData() // 实时重绘高亮
@@ -548,7 +551,8 @@ class TerminalSessionViewController: BaseTerminalSplitViewControllerChild {
     @objc private func preferencesUpdated() {
         state.fontMetrics = terminalController.fontMetrics
         state.colorMap = terminalController.colorMap
-        tableView.reloadData()
+        // 修复：确保 tableView 存在再刷新，虽然我们在 loadView 调整了顺序，但这是为了保险
+        tableView?.reloadData()
     }
 }
 
