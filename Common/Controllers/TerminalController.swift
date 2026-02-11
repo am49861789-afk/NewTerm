@@ -251,26 +251,18 @@ public class TerminalController {
             }
             terminal.clearUpdateRange()
 
-            let scrollInvariantRows = scrollbackRows + terminal.rows
             self.lastCursorLocation = cursorLocation
             
-            var count = scrollInvariantRows
-            if scrollbackRows == 0 && !terminal.buffers.isAlternateBuffer {
-                // If no scrollback, render screen height
-                count = terminal.rows
-                // Or if we want to be strict about used lines:
-                // count = terminal.buffer.y + 1
-            }
-
-            // FIXED: Use getLine() to correctly fetch history and screen lines
+            // FIXED: Directly access the raw buffer lines.
+            // This ensures we get everything that SwiftTerm holds in memory.
+            let activeBuffer = terminal.buffer
+            let totalLineCount = activeBuffer.lines.count
+            
             var alllines = [BufferLine]()
-            for i in 0..<count {
-                if let line = terminal.getLine(row: i) {
-                    alllines.append(line)
-                } else {
-                    // Fallback to empty line if needed
-                    alllines.append(terminal.buffer.lines[0]) // Dummy safe
-                }
+            alllines.reserveCapacity(totalLineCount)
+            
+            for i in 0..<totalLineCount {
+                alllines.append(activeBuffer.lines[i])
             }
             
             DispatchQueue.main.async {
