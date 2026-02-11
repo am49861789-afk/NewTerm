@@ -13,7 +13,7 @@ import SwiftUIX
 import SwiftTerm
 import NewTermCommon
 
-// MARK: - Protocol Definition
+// MARK: - Delegate Protocol
 protocol TerminalSessionViewControllerDelegate: AnyObject {
     func terminal(viewController: TerminalSessionViewController, titleDidChange title: String, isDirty: Bool, hasBell: Bool)
     func terminal(viewController: TerminalSessionViewController, screenSizeDidChange screenSize: ScreenSize)
@@ -24,19 +24,20 @@ protocol TerminalSessionViewControllerDelegate: AnyObject {
 class TerminalTextView: UITextView {
     var onPaste: ((String) -> Void)?
     
-    // 只读模式下允许粘贴
+    // 允许在只读模式下显示“粘贴”
     override func canPerformAction(_ action: Selector, withSender sender: Any?) -> Bool {
         if action == #selector(paste(_:)) { return true }
         return super.canPerformAction(action, withSender: sender)
     }
     
+    // 拦截粘贴
     override func paste(_ sender: Any?) {
         if let string = UIPasteboard.general.string {
             onPaste?(string)
         }
     }
     
-    // 优化手势冲突
+    // 优化手势：优先响应自身的文本选择手势
     override func gestureRecognizerShouldBegin(_ gestureRecognizer: UIGestureRecognizer) -> Bool {
         if gestureRecognizer is UIPanGestureRecognizer || gestureRecognizer is UILongPressGestureRecognizer {
             return true
@@ -50,11 +51,7 @@ class TerminalSessionViewController: BaseTerminalSplitViewControllerChild {
 
     // MARK: Public Properties
     var keyboardToolbarHeightChanged: ((Double) -> Void)?
-    
-    // 必须为 public/internal 以便外部赋值
     var initialCommand: String?
-    
-    // 【关键修复】重命名为 sessionDelegate，避免与父类 delegate 冲突
     weak var sessionDelegate: TerminalSessionViewControllerDelegate?
 
     override var isSplitViewResizing: Bool {
@@ -90,7 +87,7 @@ class TerminalSessionViewController: BaseTerminalSplitViewControllerChild {
         super.init(nibName: nibNameOrNil, bundle: nibBundleOrNil)
         terminalController.delegate = self
         
-        // 尝试获取底层 Terminal 对象
+        // 尝试获取底层 Terminal 对象 (Mirror 反射)
         findUnderlyingTerminal()
 
         do {
@@ -104,32 +101,27 @@ class TerminalSessionViewController: BaseTerminalSplitViewControllerChild {
         fatalError("init(coder:) has not been implemented")
     }
     
-    // 【核心修复】多重查找逻辑
     private func findUnderlyingTerminal() {
-        // 1. 直接查找 terminal 属性
+        // 多重尝试获取 internal 的 terminal 对象
         let mirror = Mirror(reflecting: terminalController)
         for child in mirror.children {
             if child.label == "terminal", let t = child.value as? SwiftTerm.Terminal {
                 self.rawTerminal = t
-                NSLog("NewTermLog: Found terminal via direct mirror")
                 return
             }
         }
-        
-        // 2. 查找 terminalView.terminal 属性
+        // 如果第一层没找到，尝试在 terminalView 中查找
         for child in mirror.children {
             if child.label == "terminalView" {
                 let viewMirror = Mirror(reflecting: child.value)
                 for vChild in viewMirror.children {
                     if vChild.label == "terminal", let t = vChild.value as? SwiftTerm.Terminal {
                         self.rawTerminal = t
-                        NSLog("NewTermLog: Found terminal via terminalView mirror")
                         return
                     }
                 }
             }
         }
-        NSLog("NewTermLog: Warning - Failed to find underlying Terminal object")
     }
 
     // MARK: - View Lifecycle
@@ -137,13 +129,14 @@ class TerminalSessionViewController: BaseTerminalSplitViewControllerChild {
         super.loadView()
         title = .localize("TERMINAL", comment: "Generic title displayed before the terminal sets a proper title.")
 
-        // 1. Setup TextView
+        // 1. 初始化原生 TextView
         nativeTextView = TerminalTextView()
         nativeTextView.isEditable = false
         nativeTextView.isSelectable = true
         nativeTextView.isScrollEnabled = true
         nativeTextView.showsVerticalScrollIndicator = true
         
+        // 深色主题
         nativeTextView.backgroundColor = UIColor(red: 0.1, green: 0.1, blue: 0.1, alpha: 1.0)
         nativeTextView.textColor = UIColor(red: 0.95, green: 0.95, blue: 0.95, alpha: 1.0)
         nativeTextView.font = UIFont.monospacedSystemFont(ofSize: 12, weight: .regular)
@@ -163,7 +156,7 @@ class TerminalSessionViewController: BaseTerminalSplitViewControllerChild {
             nativeTextView.bottomAnchor.constraint(equalTo: view.bottomAnchor)
         ])
         
-        // 2. Setup Keyboard Input
+        // 2. 初始化键盘输入
         keyInput.frame = view.bounds
         keyInput.autoresizingMask = [.flexibleWidth, .flexibleHeight]
         keyInput.textView = nativeTextView
@@ -214,7 +207,7 @@ class TerminalSessionViewController: BaseTerminalSplitViewControllerChild {
         NotificationCenter.default.addObserver(self, selector: #selector(preferencesUpdated), name: Preferences.didChangeNotification, object: nil)
     }
 
-    // MARK: - Logic
+    // MARK: - Logic (Timer Sync)
     func startRefreshTimer() {
         refreshTimer?.invalidate()
         refreshTimer = Timer.scheduledTimer(withTimeInterval: 0.1, repeats: true) { [weak self] _ in
@@ -232,20 +225,17 @@ class TerminalSessionViewController: BaseTerminalSplitViewControllerChild {
         let bufferLines = terminal.buffer.lines
         var fullText = ""
         
-        // 简单的文本提取
         for i in 0..<bufferLines.count {
             let line = bufferLines[i]
             var lineStr = ""
             for j in 0..<line.count {
                 let char = line[j].getCharacter()
-                // 仅替换空字符，保留空格以便排版
                 if char == Character(UnicodeScalar(0)) {
                     lineStr.append(" ")
                 } else {
                     lineStr.append(char)
                 }
             }
-            // 简单的 rtrim，清理行尾多余空格
             while lineStr.last == " " {
                 lineStr.removeLast()
             }
@@ -279,6 +269,13 @@ class TerminalSessionViewController: BaseTerminalSplitViewControllerChild {
         terminalController.clearTerminal()
         nativeTextView.text = ""
         lastTextContent = ""
+    }
+    
+    // 【修复】补全 close 方法，这是协议要求的
+    @objc func close() {
+        if let splitViewController = parent as? TerminalSplitViewController {
+            splitViewController.remove(viewController: self)
+        }
     }
 
     override func viewWillAppear(_ animated: Bool) {
@@ -332,7 +329,6 @@ class TerminalSessionViewController: BaseTerminalSplitViewControllerChild {
         
         if screenSize != newSize {
             screenSize = newSize
-            // 修复：使用 sessionDelegate
             sessionDelegate?.terminal(viewController: self, screenSizeDidChange: newSize)
         }
     }
@@ -370,7 +366,7 @@ class TerminalSessionViewController: BaseTerminalSplitViewControllerChild {
     }
 }
 
-// MARK: - Delegate Conformance (修复协议不符)
+// MARK: - Delegate Conformance
 extension TerminalSessionViewController: TerminalControllerDelegate {
     
     func refresh(lines: inout [AnyView]) {}
@@ -386,7 +382,6 @@ extension TerminalSessionViewController: TerminalControllerDelegate {
 
     func titleDidChange(_ title: String?, isDirty: Bool, hasBell: Bool) {
         let newTitle = title ?? .localize("TERMINAL", comment: "")
-        // 修复：使用 sessionDelegate
         sessionDelegate?.terminal(viewController: self, titleDidChange: newTitle, isDirty: isDirty, hasBell: hasBell)
     }
 
@@ -396,11 +391,10 @@ extension TerminalSessionViewController: TerminalControllerDelegate {
         #endif
     }
     
-    // 【关键修复】实现缺失的方法
+    // 【修复】实现 processDidExit
     func processDidExit(exitCode: Int32) {
-        if let splitViewController = parent as? TerminalSplitViewController {
-            splitViewController.remove(viewController: self)
-        }
+        // 进程退出时调用 close
+        close()
     }
 
     func saveFile(url: URL) {
