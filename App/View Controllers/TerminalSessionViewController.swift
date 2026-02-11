@@ -60,28 +60,20 @@ class TerminalSessionViewController: BaseTerminalSplitViewControllerChild {
 
     override init(nibName nibNameOrNil: String?, bundle nibBundleOrNil: Bundle?) {
         super.init(nibName: nibNameOrNil, bundle: nibBundleOrNil)
-
         terminalController.delegate = self
-
-        do {
-            try terminalController.startSubProcess()
-            hasStarted = true
-        } catch {
-            failureError = error
-        }
+        // REMOVED: startSubProcess here. It's too early and causes crashes if callbacks fire before loadView.
+        // We will start it in viewDidLoad.
     }
 
     required init?(coder: NSCoder) {
-        // Safe fallback instead of fatalError, though this shouldn't be called typically
         super.init(nibName: nil, bundle: nil)
+        terminalController.delegate = self
     }
 
     override func loadView() {
         super.loadView()
 
         title = .localize("TERMINAL", comment: "Generic title displayed before the terminal sets a proper title.")
-
-        preferencesUpdated()
         
         tableView = UITableView()
         tableView.delegate = self
@@ -116,6 +108,9 @@ class TerminalSessionViewController: BaseTerminalSplitViewControllerChild {
         }
         keyInput.terminalInputDelegate = terminalController
         view.addSubview(keyInput)
+        
+        // Safe to update preferences now that views exist
+        preferencesUpdated()
     }
 
     override func viewDidLoad() {
@@ -162,6 +157,18 @@ class TerminalSessionViewController: BaseTerminalSplitViewControllerChild {
         }
 
         NotificationCenter.default.addObserver(self, selector: #selector(self.preferencesUpdated), name: Preferences.didChangeNotification, object: nil)
+        
+        // --- MOVED STARTUP HERE ---
+        // Start the process only when the view is loaded to prevent delegate crashes
+        if !hasStarted {
+            do {
+                try terminalController.startSubProcess()
+                hasStarted = true
+            } catch {
+                failureError = error
+                didReceiveError(error: error)
+            }
+        }
     }
 
     override func viewWillAppear(_ animated: Bool) {
@@ -241,6 +248,9 @@ class TerminalSessionViewController: BaseTerminalSplitViewControllerChild {
     // MARK: - Screen
 
     func updateScreenSize() {
+        // Fix: Guard against view not being loaded
+        guard isViewLoaded, let _ = textView else { return }
+        
         if isSplitViewResizing {
             return
         }
@@ -260,12 +270,11 @@ class TerminalSessionViewController: BaseTerminalSplitViewControllerChild {
         }
 
         let glyphSize = terminalController.fontMetrics.boundingBox
-        // Safety Check 2: Ensure glyph size is valid to avoid division by zero
+        // Safety Check 2: Ensure glyph size is valid
         if glyphSize.width <= 0.1 || glyphSize.height <= 0.1 {
             return
         }
         
-        // Safety Check 3: Calculate cols/rows carefully and Clamp to minimum 1
         let cols = max(1, UInt16(layoutSize.width / glyphSize.width))
         let rows = max(1, UInt16(layoutSize.height / glyphSize.height.rounded(.up)))
 
@@ -300,6 +309,7 @@ class TerminalSessionViewController: BaseTerminalSplitViewControllerChild {
     // MARK: - Gestures & Selection
     
     private func locationToGrid(point: CGPoint) -> (col: Int, row: Int)? {
+        guard isViewLoaded, tableView != nil else { return nil }
         guard let indexPath = tableView.indexPathForRow(at: point),
               let cell = tableView.cellForRow(at: indexPath) else { return nil }
         
@@ -318,6 +328,7 @@ class TerminalSessionViewController: BaseTerminalSplitViewControllerChild {
     }
 
     @objc private func handleLongPress(_ gesture: UILongPressGestureRecognizer) {
+        guard isViewLoaded else { return }
         let point = gesture.location(in: tableView)
         
         switch gesture.state {
@@ -339,6 +350,7 @@ class TerminalSessionViewController: BaseTerminalSplitViewControllerChild {
     }
     
     @objc private func handlePan(_ gesture: UIPanGestureRecognizer) {
+        guard isViewLoaded else { return }
         let point = gesture.location(in: tableView)
         
         switch gesture.state {
@@ -359,6 +371,7 @@ class TerminalSessionViewController: BaseTerminalSplitViewControllerChild {
     }
     
     private func clearSelection() {
+        guard isViewLoaded, tableView != nil else { return }
         selectionStart = nil
         selectionEnd = nil
         isSelecting = false
@@ -421,11 +434,8 @@ class TerminalSessionViewController: BaseTerminalSplitViewControllerChild {
         
         for rowIndex in safeMinRow...safeMaxRow {
             if let term = terminalController.terminal {
-                // Ensure accessing buffer is safe.
                 let targetRow = rowIndex + term.buffer.yDisp
                 
-                // SwiftTerm usually handles range checking internally, but let's be safe.
-                // We use getLine which returns optional.
                 if let termLine = term.getLine(row: targetRow) {
                      let str = termLine.translateToString()
                      let len = str.count
@@ -480,6 +490,7 @@ class TerminalSessionViewController: BaseTerminalSplitViewControllerChild {
     }
 
     @objc private func preferencesUpdated() {
+        guard isViewLoaded, tableView != nil else { return }
         state.fontMetrics = terminalController.fontMetrics
         state.colorMap = terminalController.colorMap
         tableView.reloadData()
@@ -489,11 +500,15 @@ class TerminalSessionViewController: BaseTerminalSplitViewControllerChild {
 extension TerminalSessionViewController: TerminalControllerDelegate {
 
     func refresh(lines: inout [AnyView]) {
+        // Fix: Ensure view is loaded before refreshing
+        guard isViewLoaded, tableView != nil else { return }
         state.lines = lines
         self.scroll()
     }
     
     func refresh(lines: inout [BufferLine], cursor: (Int,Int)) {
+        // Fix: Ensure view is loaded before refreshing
+        guard isViewLoaded, tableView != nil else { return }
         self.lines = lines
         self.cursor = cursor
         self.tableView.reloadData()
@@ -501,6 +516,8 @@ extension TerminalSessionViewController: TerminalControllerDelegate {
     }
     
     func scroll(animated: Bool = false) {
+        // Fix: Ensure view is loaded
+        guard isViewLoaded, tableView != nil else { return }
         if isSelecting { return }
         
         state.scroll += 1
@@ -633,7 +650,7 @@ class SwiftUITableViewCell: UITableViewCell {
     }
     
     required init?(coder: NSCoder) {
-        super.init(coder: coder) // Call super, although usually fatal error is better for dev, we want to avoid crashes
+        super.init(coder: coder) 
     }
     
     func configure(with view: AnyView, selectionRange: Range<Int>?, charWidth: CGFloat) {
@@ -684,13 +701,10 @@ extension TerminalSessionViewController: UITableViewDataSource {
     func tableView(_ tableView: UITableView, cellForRowAt indexPath: IndexPath) -> UITableViewCell {
         let cell = tableView.dequeueReusableCell(withIdentifier: "Cell") as? SwiftUITableViewCell ?? SwiftUITableViewCell(style: .default, reuseIdentifier: "Cell")
         
-        // Safety check: Ensure index is valid
         if indexPath.row < self.lines.count {
             let line = self.lines[indexPath.row]
-            // Be careful with cursor index
             let cursorX = (indexPath.row == cursor.y) ? cursor.x : -1
             
-            // Generate view safely
             let view = terminalController.stringSupplier.attributedString(line: line, cursorX: cursorX)
             
             var selectionRange: Range<Int>? = nil
