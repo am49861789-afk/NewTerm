@@ -54,7 +54,6 @@ class TerminalSessionViewController: BaseTerminalSplitViewControllerChild {
     private var hasStarted = false
     private var failureError: Error?
     
-    // Prevent auto-scroll conflict during selection
     private var isManualScrolling = false
 
     private var isPickingFileForUpload = false
@@ -210,8 +209,6 @@ class TerminalSessionViewController: BaseTerminalSplitViewControllerChild {
 
         hasAppeared = false
     }
-    
-    // MARK: - Focus Management
     
     override var canBecomeFirstResponder: Bool {
         return false 
@@ -415,27 +412,26 @@ class TerminalSessionViewController: BaseTerminalSplitViewControllerChild {
         if safeMinRow > safeMaxRow { return "" }
         
         for rowIndex in safeMinRow...safeMaxRow {
-            if let term = terminalController.terminal {
-                // FIXED: Direct usage of rowIndex because 'lines' is already synced with absolute history
-                // We do NOT add term.buffer.yDisp here because our lines array is already fully populated from 0.
-                if let termLine = term.getLine(row: rowIndex) {
-                     let str = termLine.translateToString()
-                     let len = str.count
-                     var s = 0
-                     var e = len
-                     
-                     if rowIndex == safeMinRow {
-                         s = min(len, startCol)
-                     }
-                     if rowIndex == safeMaxRow {
-                         e = min(len, endCol + 1)
-                     }
-                     
-                     if s < e {
-                         let startIdx = str.index(str.startIndex, offsetBy: s)
-                         let endIdx = str.index(str.startIndex, offsetBy: e)
-                         result += str[startIdx..<endIdx]
-                     }
+            // FIXED: Use self.lines to ensure WYSIWYG
+            if rowIndex < self.lines.count {
+                let line = self.lines[rowIndex]
+                // BufferLine to String
+                let str = line.translateToString()
+                let len = str.count
+                var s = 0
+                var e = len
+                
+                if rowIndex == safeMinRow {
+                    s = min(len, startCol)
+                }
+                if rowIndex == safeMaxRow {
+                    e = min(len, endCol + 1)
+                }
+                
+                if s < e {
+                    let startIdx = str.index(str.startIndex, offsetBy: s)
+                    let endIdx = str.index(str.startIndex, offsetBy: e)
+                    result += str[startIdx..<endIdx]
                 }
             }
             
@@ -632,6 +628,14 @@ class SwiftUITableViewCell: UITableViewCell {
         super.init(coder: coder) 
     }
     
+    override func layoutSubviews() {
+        super.layoutSubviews()
+        // Ensure selection layer is always on top
+        if !selectionLayer.isHidden {
+            contentView.bringSubviewToFront(selectionLayer)
+        }
+    }
+    
     func configure(with view: AnyView, selectionRange: Range<Int>?, charWidth: CGFloat) {
         if let existingHostingView = hostingView {
             existingHostingView.rootView = view
@@ -654,7 +658,6 @@ class SwiftUITableViewCell: UITableViewCell {
             let width = CGFloat(range.count) * charWidth
             selectionLayer.frame = CGRect(x: startX, y: 0, width: width, height: contentView.bounds.height)
             selectionLayer.isHidden = false
-            // FIXED: Bring selection layer to front so it overlays the text background
             contentView.bringSubviewToFront(selectionLayer)
         } else {
             selectionLayer.isHidden = true
