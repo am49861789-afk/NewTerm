@@ -13,6 +13,32 @@ import SwiftUIX
 import SwiftTerm
 import NewTermCommon
 
+// 自定义 TextView 以支持只读模式下的粘贴功能
+class TerminalTextView: UITextView {
+    // 粘贴回调
+    var onPaste: ((String) -> Void)?
+    
+    // 允许粘贴，即使是不可编辑状态
+    override func canPerformAction(_ action: Selector, withSender sender: Any?) -> Bool {
+        if action == #selector(paste(_:)) {
+            return true
+        }
+        return super.canPerformAction(action, withSender: sender)
+    }
+    
+    // 拦截粘贴操作
+    override func paste(_ sender: Any?) {
+        if let string = UIPasteboard.general.string {
+            onPaste?(string)
+        }
+    }
+    
+    // 禁用放大镜等不需要的交互（可选）
+    // override func gestureRecognizerShouldBegin(_ gestureRecognizer: UIGestureRecognizer) -> Bool {
+    //    return super.gestureRecognizerShouldBegin(gestureRecognizer)
+    // }
+}
+
 class TerminalSessionViewController: BaseTerminalSplitViewControllerChild {
 
     var keyboardToolbarHeightChanged: ((Double) -> Void)?
@@ -32,12 +58,15 @@ class TerminalSessionViewController: BaseTerminalSplitViewControllerChild {
     private var terminalController = TerminalController()
     private var keyInput = TerminalKeyInput(frame: .zero)
     
-    // 使用原生的 UITextView，保证100%原生选中体验
-    private var nativeTextView: UITextView!
+    // 使用自定义的 TextView
+    private var nativeTextView: TerminalTextView!
     
-    // 缓存一些状态
+    // 关键：通过反射持有的 Terminal 对象引用
+    private weak var rawTerminal: SwiftTerm.Terminal?
+    
     private var state = TerminalState()
-    private var lastContentHeight: CGFloat = 0
+    private var lines = [BufferLine]()
+    private var cursor = (x: Int(-1), y: Int(-1))
 
     private var hudState = HUDViewState()
     private var hudView: UIHostingView<AnyView>!
@@ -51,6 +80,16 @@ class TerminalSessionViewController: BaseTerminalSplitViewControllerChild {
         super.init(nibName: nibNameOrNil, bundle: nibBundleOrNil)
 
         terminalController.delegate = self
+        
+        // MARK: - 核心黑科技：使用 Mirror 获取 internal 的 terminal 对象
+        // 这样我们就能直接访问数据，解决报错和白屏问题
+        let mirror = Mirror(reflecting: terminalController)
+        for child in mirror.children {
+            if child.label == "terminal" {
+                self.rawTerminal = child.value as? SwiftTerm.Terminal
+                break
+            }
+        }
 
         do {
             try terminalController.startSubProcess()
@@ -69,24 +108,29 @@ class TerminalSessionViewController: BaseTerminalSplitViewControllerChild {
 
         title = .localize("TERMINAL", comment: "Generic title displayed before the terminal sets a proper title.")
 
-        // 1. 初始化原生的 UITextView
-        nativeTextView = UITextView()
-        nativeTextView.isEditable = false       // 只读，但可选择
-        nativeTextView.isSelectable = true      // 开启原生选中！
+        // 1. 初始化 Native TextView
+        nativeTextView = TerminalTextView()
+        nativeTextView.isEditable = false       // 只读
+        nativeTextView.isSelectable = true      // 允许选中
         nativeTextView.isScrollEnabled = true
         nativeTextView.showsVerticalScrollIndicator = true
         nativeTextView.textContainerInset = UIEdgeInsets(top: 8, left: 5, bottom: 20, right: 5)
         
+        // 设置回调：当用户点击菜单中的“粘贴”时，发送到终端
+        nativeTextView.onPaste = { [weak self] text in
+            self?.terminalController.write(text.utf8Array)
+        }
+        
         // 外观设置：深色背景，浅色文字
         nativeTextView.backgroundColor = UIColor(red: 0.1, green: 0.1, blue: 0.1, alpha: 1.0)
         nativeTextView.textColor = .lightGray
+        // 初始字体
         nativeTextView.font = UIFont.monospacedSystemFont(ofSize: 12, weight: .regular)
         
-        // 布局设置
         nativeTextView.translatesAutoresizingMaskIntoConstraints = false
         view.addSubview(nativeTextView)
         
-        // 填满整个屏幕
+        // 布局
         NSLayoutConstraint.activate([
             nativeTextView.leadingAnchor.constraint(equalTo: view.safeAreaLayoutGuide.leadingAnchor),
             nativeTextView.trailingAnchor.constraint(equalTo: view.safeAreaLayoutGuide.trailingAnchor),
@@ -94,17 +138,14 @@ class TerminalSessionViewController: BaseTerminalSplitViewControllerChild {
             nativeTextView.bottomAnchor.constraint(equalTo: view.bottomAnchor)
         ])
         
-        // 2. 键盘输入处理
+        // 2. 键盘输入绑定
         keyInput.frame = view.bounds
         keyInput.autoresizingMask = [.flexibleWidth, .flexibleHeight]
-        
-        // 绑定键盘
         keyInput.textView = nativeTextView 
         
         keyInput.keyboardToolbarHeightChanged = { [weak self] height in
             guard let self = self else { return }
             self.keyboardToolbarHeightChanged?(height)
-            // 调整底部间距，防止键盘遮挡内容
             var insets = self.nativeTextView.contentInset
             insets.bottom = height
             self.nativeTextView.contentInset = insets
@@ -114,7 +155,7 @@ class TerminalSessionViewController: BaseTerminalSplitViewControllerChild {
         keyInput.terminalInputDelegate = terminalController
         view.addSubview(keyInput)
         
-        // 点击手势：点击唤起键盘
+        // 确保点击能唤起键盘
         let tap = UITapGestureRecognizer(target: self, action: #selector(handleTap))
         nativeTextView.addGestureRecognizer(tap)
         
@@ -124,7 +165,6 @@ class TerminalSessionViewController: BaseTerminalSplitViewControllerChild {
     override func viewDidLoad() {
         super.viewDidLoad()
 
-        // HUD (响铃提示)
         hudView = UIHostingView(rootView: AnyView(
             HUDView()
                 .environmentObject(self.hudState)
@@ -139,7 +179,6 @@ class TerminalSessionViewController: BaseTerminalSplitViewControllerChild {
             hudView.centerYAnchor.constraint(equalTo: view.safeAreaLayoutGuide.centerYAnchor)
         ])
 
-        // 快捷键
         addKeyCommand(UIKeyCommand(title: .localize("CLEAR_TERMINAL", comment: "VoiceOver label for a button that clears the terminal."),
                                    image: UIImage(systemName: "text.badge.xmark"),
                                    action: #selector(self.clearTerminal),
@@ -206,7 +245,6 @@ class TerminalSessionViewController: BaseTerminalSplitViewControllerChild {
     func updateScreenSize() {
         if isSplitViewResizing { return }
 
-        // 计算可见区域大小
         var layoutSize = nativeTextView.bounds.size
         layoutSize.width -= (nativeTextView.textContainerInset.left + nativeTextView.textContainerInset.right)
         layoutSize.height -= (nativeTextView.textContainerInset.top + nativeTextView.textContainerInset.bottom)
@@ -253,80 +291,58 @@ class TerminalSessionViewController: BaseTerminalSplitViewControllerChild {
     }
 
     @objc private func preferencesUpdated() {
-        // 更新字体 (修复了之前的编译错误)
         let fontSize = CGFloat(Preferences.shared.fontSize)
-        // 尝试加载自定义字体，如果失败则使用系统等宽字体
         let fontName = Preferences.shared.fontName
-        let font: UIFont
+        
+        // 安全获取字体
         if let customFont = UIFont(name: fontName, size: fontSize) {
-            font = customFont
+            nativeTextView.font = customFont
         } else {
-            font = UIFont.monospacedSystemFont(ofSize: fontSize, weight: .regular)
+            nativeTextView.font = UIFont.monospacedSystemFont(ofSize: fontSize, weight: .regular)
         }
-        nativeTextView.font = font
         
         // 重新计算屏幕大小
         state.fontMetrics = terminalController.fontMetrics
         updateScreenSize()
     }
-    
-    // MARK: - 粘贴功能
-    override func paste(_ sender: Any?) {
-        // 拦截系统的粘贴，将内容发送给终端
-        if let string = UIPasteboard.general.string {
-            terminalController.write(string.utf8Array)
-        }
-    }
-    
-    override func canPerformAction(_ action: Selector, withSender sender: Any?) -> Bool {
-        // 允许粘贴
-        if action == #selector(paste(_:)) {
-            return true
-        }
-        return super.canPerformAction(action, withSender: sender)
-    }
 }
 
-// MARK: - 核心渲染逻辑 (这里解决了白屏问题)
+// MARK: - 核心渲染逻辑 (从 rawTerminal 读取)
 extension TerminalSessionViewController: TerminalControllerDelegate {
 
-    // NewTerm 会调用这个方法来刷新 UI
+    // 这个方法会被调用，我们忽略它的 AnyView 参数，改用我们自己的数据源
     func refresh(lines: inout [AnyView]) {
-        // 我们不使用传入的 [AnyView]，因为那是给 SwiftUI 用的。
-        // 我们直接从 terminal 实例中拉取原始文本数据。
+        // 使用 Mirror 捕获的 rawTerminal
+        guard let terminal = self.rawTerminal else { return }
         
-        guard let terminal = terminalController.terminal else { return }
-        
-        // 放在主线程更新 UI
         DispatchQueue.main.async { [weak self] in
             guard let self = self else { return }
             
-            // 构建全文本字符串
+            // 简单的文本构建：直接拼接所有行
+            // 性能优化：在生产环境中可以只更新差异，但对于终端来说，全量更新通常是可接受的
+            // 除非缓冲区非常大
             var fullText = ""
             let bufferLines = terminal.buffer.lines
             
-            // 遍历所有行
             for i in 0..<bufferLines.count {
                 let line = bufferLines[i]
                 var lineStr = ""
-                // 遍历行内的字符
                 for j in 0..<line.count {
                     let charData = line[j]
                     let char = charData.getCharacter()
-                    // 替换空字符为空格，保持排版
                     if char == Character(UnicodeScalar(0)) {
                         lineStr.append(" ")
                     } else {
                         lineStr.append(char)
                     }
                 }
-                // 每行结束加换行符
+                // 去除右侧空格可以避免 TextWrapper 导致的奇怪换行，但可能影响 ASCII art
+                 lineStr = lineStr.replacingOccurrences(of: "\\s+$", with: "", options: .regularExpression)
                 fullText += lineStr + "\n"
             }
             
-            // 只有当内容发生变化时才更新，避免光标跳动
+            // 只有变化时才赋值，防止光标跳动太厉害
             if self.nativeTextView.text != fullText {
-                // 检查是否需要自动滚动到底部
                 let isAtBottom = self.nativeTextView.contentOffset.y >= (self.nativeTextView.contentSize.height - self.nativeTextView.bounds.height - 30)
                 
                 self.nativeTextView.text = fullText
@@ -339,13 +355,12 @@ extension TerminalSessionViewController: TerminalControllerDelegate {
         }
     }
     
-    // 这个方法是为了兼容性保留的，NewTerm 可能不会调用它
     func refresh(lines: inout [BufferLine], cursor: (Int,Int)) {
-        // 留空
+        // 忽略
     }
     
     func scroll(animated: Bool = false) {
-        // UITextView 自动处理滚动
+        // UITextView 自动处理
     }
 
     func activateBell() {
