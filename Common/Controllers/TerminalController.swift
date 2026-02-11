@@ -31,15 +31,14 @@ public class TerminalController {
     public weak var delegate: TerminalControllerDelegate?
 
     public var colorMap: ColorMap {
-        get { stringSupplier.colorMap ?? Preferences.shared.colorMap } // Safe unwrap
+        get { stringSupplier.colorMap ?? Preferences.shared.colorMap }
         set { stringSupplier.colorMap = newValue }
     }
     public var fontMetrics: FontMetrics {
-        get { stringSupplier.fontMetrics ?? Preferences.shared.fontMetrics } // Safe unwrap
+        get { stringSupplier.fontMetrics ?? Preferences.shared.fontMetrics }
         set { stringSupplier.fontMetrics = newValue }
     }
 
-    // MARK: - CHANGED: internal -> public
     public var terminal: Terminal?
     
     private var subProcess: SubProcess?
@@ -134,14 +133,11 @@ public class TerminalController {
     }
 
     public func windowDidEnterBackground() {
-        // Throttle the update timer to save battery. On iPhone, we shouldn’t be visible at all in this
-        // case, so throttle right down to once per second so we can maintain the dirty bit.
         startUpdateTimer(fps: UIApplication.shared.supportsMultipleScenes ? 10 : 1)
         isWindowVisible = false
     }
 
     public func windowWillEnterForeground() {
-        // Go back to full speed.
         isWindowVisible = true
         if isVisible {
             startUpdateTimer(fps: refreshRate)
@@ -159,13 +155,11 @@ public class TerminalController {
     }
 
     public func terminalWillAppear() {
-        // Start updating again.
         startUpdateTimer(fps: refreshRate)
         isTabVisible = true
     }
 
     public func terminalWillDisappear() {
-        // Not visible, so throttle right down to once per second so we can maintain the dirty bit.
         startUpdateTimer(fps: 1)
         isTabVisible = false
     }
@@ -212,7 +206,6 @@ public class TerminalController {
         
         if buflen > 100 {
             terminalQueue.sync {
-                //waiting for terminal to process buffer
             }
         }
     }
@@ -254,7 +247,6 @@ public class TerminalController {
 
             let updateRange = terminal.getScrollInvariantUpdateRange() ?? (0, 0)
             if updateRange == (0, 0) && cursorLocation == self.lastCursorLocation {
-                // Nothing changed, nothing to do.
                 return
             }
             terminal.clearUpdateRange()
@@ -267,11 +259,6 @@ public class TerminalController {
                 count = terminal.buffer.y+1
             }
 
-//            self.lines = [AnyView]()
-//            for i in 0..<count {
-//                self.lines.append(self.stringSupplier.attributedString(forScrollInvariantRow: i))
-//            }
-
             var alllines = [BufferLine]()
             for i in 0..<count {
                 let line = terminal.buffer.lines[i]
@@ -279,7 +266,6 @@ public class TerminalController {
             }
             
             DispatchQueue.main.async {
-//                self.delegate?.refresh(lines: &self.lines)
                 self.delegate?.refresh(lines: &alllines, cursor: cursorLocation)
 
                 if !self.isVisible && !self.isDirty {
@@ -294,7 +280,6 @@ public class TerminalController {
             self.terminal?.resetToInitialState()
         }
 
-        // To trigger a redraw, update the screen size, then update it back.
         if let screenSize = screenSize {
             var newScreenSize = screenSize
             newScreenSize.cols -= 1
@@ -307,8 +292,6 @@ public class TerminalController {
     }
 
     private func updateScreenSize() {
-        // NSLog("NewTermLog: TerminalController.updateScreenSize rows=\(screenSize?.rows) cols=\(screenSize?.cols) self=\(Unmanaged.passUnretained(self).toOpaque())")
-        
         terminalQueue.async {
             if let screenSize = self.screenSize, let terminal = self.terminal,
                screenSize.cols != terminal.cols || screenSize.rows != terminal.rows {
@@ -351,8 +334,6 @@ public class TerminalController {
                                                                     hasBell: hasBell)
     }
 
-    // MARK: - Object lifecycle
-
     deinit {
         updateTimer?.invalidate()
     }
@@ -371,7 +352,6 @@ extension TerminalController: TerminalDelegate {
 
     public func bell(source: Terminal) {
         DispatchQueue.main.async {
-            // Throttle bell so it only rings a maximum of once a second.
             if self.lastBellDate == nil || self.lastBellDate! < Date(timeIntervalSinceNow: -1) {
                 self.lastBellDate = Date()
                 self.delegate?.activateBell()
@@ -392,7 +372,6 @@ extension TerminalController: TerminalDelegate {
     }
 
     public func mouseModeChanged(source: Terminal) {
-        // TODO: Handle mouse mode changes
     }
 
     public func titleChanged(source: Terminal, title: String) {
@@ -403,7 +382,6 @@ extension TerminalController: TerminalDelegate {
     }
 
     public func sizeChanged(source: Terminal) {
-        // Handled by the owner of the controller.
     }
 
     public func setTerminalTitle(source: Terminal, title: String) {
@@ -421,7 +399,6 @@ extension TerminalController: TerminalDelegate {
     }
 
     public func rangeChanged(source: Terminal, startY: Int, endY: Int) {
-        // We poll the terminal in the display link, so we don’t need this.
     }
 
 }
@@ -429,22 +406,18 @@ extension TerminalController: TerminalDelegate {
 extension TerminalController: SubProcessDelegate {
 
     func subProcessDidConnect() {
-        // Nothing to do.
     }
 
     func subProcess(didReceiveData data: [UTF8Char]) {
-        // Pass data to the terminal emulator.
         readInputStream(data)
     }
 
     func subProcess(didDisconnectWithError error: Error?) {
         if let error = error {
-            // If the process failed, display the error.
             DispatchQueue.main.async {
                 self.delegate?.didReceiveError(error: error)
             }
         } else {
-            // If the process exited cleanly, close the terminal.
             DispatchQueue.main.async {
                 self.delegate?.close()
             }
@@ -459,7 +432,6 @@ extension TerminalController: SubProcessDelegate {
 
 }
 
-// MARK: - Protocol Conformance Fix
 extension TerminalController: TerminalInputProtocol {
     public func receiveKeyboardInput(data: [UTF8Char]) {
         self.write(data)
@@ -469,8 +441,6 @@ extension TerminalController: TerminalInputProtocol {
         return self.terminal?.applicationCursor ?? false
     }
     
-    // We return nil here because selection is handled by the View Controller now.
-    // However, the protocol requires this method.
     public func getAllText() -> String? {
         return nil
     }
