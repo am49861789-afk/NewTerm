@@ -31,11 +31,11 @@ public class TerminalController {
     public weak var delegate: TerminalControllerDelegate?
 
     public var colorMap: ColorMap {
-        get { stringSupplier.colorMap! }
+        get { stringSupplier.colorMap ?? Preferences.shared.colorMap } // Safe unwrap
         set { stringSupplier.colorMap = newValue }
     }
     public var fontMetrics: FontMetrics {
-        get { stringSupplier.fontMetrics! }
+        get { stringSupplier.fontMetrics ?? Preferences.shared.fontMetrics } // Safe unwrap
         set { stringSupplier.fontMetrics = newValue }
     }
 
