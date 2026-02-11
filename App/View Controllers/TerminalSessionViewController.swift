@@ -72,7 +72,8 @@ class TerminalSessionViewController: BaseTerminalSplitViewControllerChild {
     }
 
     required init?(coder: NSCoder) {
-        fatalError("init(coder:) has not been implemented")
+        // Safe fallback instead of fatalError, though this shouldn't be called typically
+        super.init(nibName: nil, bundle: nil)
     }
 
     override func loadView() {
@@ -88,7 +89,7 @@ class TerminalSessionViewController: BaseTerminalSplitViewControllerChild {
         tableView.separatorStyle = .none
         tableView.separatorInset = .zero
         tableView.backgroundColor = .clear
-        tableView.allowsSelection = false // Disable native table selection to handle it manually
+        tableView.allowsSelection = false 
         
         textView = tableView
 
@@ -141,7 +142,6 @@ class TerminalSessionViewController: BaseTerminalSplitViewControllerChild {
                                                              input: "k",
                                                              modifierFlags: .command))
         
-        // Add Copy Command support
         addKeyCommand(UIKeyCommand(title: .localize("COPY", comment: "Copy text"),
                                    image: UIImage(systemName: "doc.on.doc"),
                                    action: #selector(self.copy(_:)),
@@ -201,35 +201,28 @@ class TerminalSessionViewController: BaseTerminalSplitViewControllerChild {
     }
     
     override func viewWillTransition(to size: CGSize, with coordinator: UIViewControllerTransitionCoordinator) {
-        // NSLog("NewTermLog: viewWillTransition to \(size)")
         super.viewWillTransition(to: size, with: coordinator)
         if UIDevice.current.userInterfaceIdiom == .pad {
             if keyInput.isFirstResponder {
-                //reload keyboardToolbar
                 keyInput.resignFirstResponder()
             }
         }
     }
     
     override func viewWillLayoutSubviews() {
-        // NSLog("NewTermLog: TerminalSessionViewController.viewWillLayoutSubviews \(self.view.frame) \(self.view.safeAreaInsets)")
         super.viewWillLayoutSubviews()
         updateScreenSize()
     }
     
     override func viewDidLayoutSubviews() {
         super.viewDidLayoutSubviews()
-        // NSLog("NewTermLog: TerminalSessionViewController.viewDidLayoutSubviews \(self.view.frame) \(self.view.safeAreaInsets)")
-        // NSLog("NewTermLog: textView frame=\(self.textView.frame) safeArea=\(self.textView.safeAreaInsets)")
     }
 
     override func viewSafeAreaInsetsDidChange() {
-        // NSLog("NewTermLog: TerminalSessionViewController.viewSafeAreaInsetsDidChange \(self.view.frame) \(view.safeAreaInsets)")
         super.viewSafeAreaInsetsDidChange()
     }
 
     override func traitCollectionDidChange(_ previousTraitCollection: UITraitCollection?) {
-        // NSLog("NewTermLog: TerminalSessionViewController.traitCollectionDidChange \(self.view.frame) \(view.safeAreaInsets)")
         super.traitCollectionDidChange(previousTraitCollection)
     }
 
@@ -252,46 +245,37 @@ class TerminalSessionViewController: BaseTerminalSplitViewControllerChild {
             return
         }
 
-        // Determine the screen size based on the font size
         var layoutSize = self.view.safeAreaLayoutGuide.layoutFrame.size
         layoutSize.width -= TerminalView.horizontalSpacing * 2
         layoutSize.height -= TerminalView.verticalSpacing * 2
 
-        if layoutSize.width <= 0 || layoutSize.height <= 0 {
-            // Not laid out yet. We’ll be called again when we are.
+        // Safety Check 1: Ensure layout size is positive
+        if layoutSize.width <= 1 || layoutSize.height <= 1 {
             return
         }
         
         let layoutFrame1 = self.view.safeAreaLayoutGuide.layoutFrame
         if layoutFrame1.origin.x < 0 || layoutFrame1.origin.y < 0 {
-            //in layouting
-            return
-        }
-        let layoutFrame2 = self.textView.safeAreaLayoutGuide.layoutFrame
-        if layoutFrame2.origin.x < 0 || layoutFrame2.origin.y < 0 {
-            //in layouting
             return
         }
 
         let glyphSize = terminalController.fontMetrics.boundingBox
-        
-        // --- FIX: Prevent crash if glyph size is invalid ---
+        // Safety Check 2: Ensure glyph size is valid to avoid division by zero
         if glyphSize.width <= 0.1 || glyphSize.height <= 0.1 {
-            // Font metrics not ready yet, skip layout update
             return
         }
-        // --------------------------------------------------
         
-        // NSLog("NewTermLog: TerminalSessionViewController.updateScreenSize self=\(self.view.safeAreaLayoutGuide.layoutFrame) textView=\(textView.safeAreaLayoutGuide.layoutFrame)")
-        let newSize = ScreenSize(cols: UInt16(layoutSize.width / glyphSize.width),
-                                                         rows: UInt16(layoutSize.height / glyphSize.height.rounded(.up)),
-                                                         cellSize: glyphSize)
+        // Safety Check 3: Calculate cols/rows carefully and Clamp to minimum 1
+        let cols = max(1, UInt16(layoutSize.width / glyphSize.width))
+        let rows = max(1, UInt16(layoutSize.height / glyphSize.height.rounded(.up)))
+
+        let newSize = ScreenSize(cols: cols, rows: rows, cellSize: glyphSize)
+        
         if screenSize != newSize {
             screenSize = newSize
             delegate?.terminal(viewController: self, screenSizeDidChange: newSize)
         }
         else {
-            //when layout size changes, always scroll even if rows/columns don't change
             self.scroll(animated: true)
         }
     }
@@ -302,7 +286,6 @@ class TerminalSessionViewController: BaseTerminalSplitViewControllerChild {
     }
 
     private func updateIsSplitViewResizing() {
-        // NSLog("NewTermLog: TerminalSessionViewController.updateIsSplitViewResizing")
         state.isSplitViewResizing = isSplitViewResizing
 
         if !isSplitViewResizing {
@@ -311,7 +294,6 @@ class TerminalSessionViewController: BaseTerminalSplitViewControllerChild {
     }
 
     private func updateShowsTitleView() {
-        // NSLog("NewTermLog: TerminalSessionViewController.updateShowsTitleView")
         updateScreenSize()
     }
 
@@ -322,18 +304,13 @@ class TerminalSessionViewController: BaseTerminalSplitViewControllerChild {
               let cell = tableView.cellForRow(at: indexPath) else { return nil }
         
         let charWidth = terminalController.fontMetrics.boundingBox.width
+        if charWidth <= 0.1 { return nil }
         
-        // --- FIX: Prevent crash if charWidth is 0 ---
-        if charWidth <= 0 { return nil }
-        // ------------------------------------------
-        
-        // Adjust point to be relative to the cell's content view
         let localPoint = tableView.convert(point, to: cell.contentView)
         
         let col = Int(localPoint.x / charWidth)
         let row = indexPath.row
         
-        // Clamp column
         let maxCol = Int(terminalController.screenSize?.cols ?? 80)
         let clampedCol = max(0, min(col, maxCol - 1))
         
@@ -346,7 +323,6 @@ class TerminalSessionViewController: BaseTerminalSplitViewControllerChild {
         switch gesture.state {
         case .began:
             if let gridPos = locationToGrid(point: point) {
-                // Haptic feedback
                 let generator = UIImpactFeedbackGenerator(style: .medium)
                 generator.impactOccurred()
                 
@@ -354,7 +330,6 @@ class TerminalSessionViewController: BaseTerminalSplitViewControllerChild {
                 selectionStart = gridPos
                 selectionEnd = gridPos
                 
-                // Show Menu Controller
                 showMenuController(at: point)
                 tableView.reloadData()
             }
@@ -372,8 +347,6 @@ class TerminalSessionViewController: BaseTerminalSplitViewControllerChild {
                 if let gridPos = locationToGrid(point: point) {
                     selectionEnd = gridPos
                     tableView.reloadData()
-                    
-                    // TODO: Handle auto-scrolling when dragging near edges
                 }
             }
         case .ended:
@@ -399,13 +372,11 @@ class TerminalSessionViewController: BaseTerminalSplitViewControllerChild {
         becomeFirstResponder()
         let menu = UIMenuController.shared
         
-        // Create a rectangle for the menu target
         let rect = CGRect(x: point.x, y: point.y - 20, width: 1, height: 1)
         
         if #available(iOS 13.0, *) {
             menu.showMenu(from: tableView, rect: rect)
         } else {
-            // Fallback for older iOS
             menu.setTargetRect(rect, in: tableView)
             menu.setMenuVisible(true, animated: true)
         }
@@ -440,54 +411,39 @@ class TerminalSessionViewController: BaseTerminalSplitViewControllerChild {
     }
     
     private func getSelectedText(start: (col: Int, row: Int), end: (col: Int, row: Int)) -> String {
-        // Normalize range
         let (minR, maxR, startCol, endCol) = normalizeSelection(start: start, end: end)
         
         var result = ""
-        
-        // Ensure bounds are safe
         let safeMinRow = max(0, minR)
         let safeMaxRow = min(lines.count - 1, maxR)
         
         if safeMinRow > safeMaxRow { return "" }
         
         for rowIndex in safeMinRow...safeMaxRow {
-            // Need to extract text from BufferLine.
-            // Using terminal instance since we made it public
             if let term = terminalController.terminal {
-                // Buffer rows are scroll-invariant usually in SwiftTerm logic, need to check if we need yDisp adjustment.
-                // In refresh() we get 'lines' which are BufferLine.
-                // SwiftTerm lines in `refresh` are typically the visible ones.
-                // Assuming `lines` array matches `rowIndex`.
+                // Ensure accessing buffer is safe.
+                let targetRow = rowIndex + term.buffer.yDisp
                 
-                // Let's use the local lines variable which we refreshed.
-                if rowIndex < lines.count {
-                    let _ = lines[rowIndex]
-                    // Fallback to a simple extraction if possible, or use terminal helper
-                    // Note: terminal.getLine(row) expects absolute row index if I recall correctly, or relative.
-                    // Since we have `lines` cached which are just data, we need a way to interpret them.
-                    // For now, let's assume we can get the text from the terminal for the *visible* rows.
-                    // The visible rows correspond to terminal.buffer.lines[terminal.buffer.yDisp + i]
-                    
-                    if let termLine = term.getLine(row: rowIndex + term.buffer.yDisp) {
-                         let str = termLine.translateToString()
-                         let len = str.count
-                         var s = 0
-                         var e = len
-                         
-                         if rowIndex == safeMinRow {
-                             s = min(len, startCol)
-                         }
-                         if rowIndex == safeMaxRow {
-                             e = min(len, endCol + 1)
-                         }
-                         
-                         if s < e {
-                             let startIdx = str.index(str.startIndex, offsetBy: s)
-                             let endIdx = str.index(str.startIndex, offsetBy: e)
-                             result += str[startIdx..<endIdx]
-                         }
-                    }
+                // SwiftTerm usually handles range checking internally, but let's be safe.
+                // We use getLine which returns optional.
+                if let termLine = term.getLine(row: targetRow) {
+                     let str = termLine.translateToString()
+                     let len = str.count
+                     var s = 0
+                     var e = len
+                     
+                     if rowIndex == safeMinRow {
+                         s = min(len, startCol)
+                     }
+                     if rowIndex == safeMaxRow {
+                         e = min(len, endCol + 1)
+                     }
+                     
+                     if s < e {
+                         let startIdx = str.index(str.startIndex, offsetBy: s)
+                         let endIdx = str.index(str.startIndex, offsetBy: e)
+                         result += str[startIdx..<endIdx]
+                     }
                 }
             }
             
@@ -498,14 +454,12 @@ class TerminalSessionViewController: BaseTerminalSplitViewControllerChild {
         return result
     }
     
-    // Helper to normalize selection (start could be after end)
     private func normalizeSelection(start: (col: Int, row: Int), end: (col: Int, row: Int)) -> (minRow: Int, maxRow: Int, startCol: Int, endCol: Int) {
         if start.row < end.row {
             return (start.row, end.row, start.col, end.col)
         } else if start.row > end.row {
             return (end.row, start.row, end.col, start.col)
         } else {
-            // Same row
             return (start.row, start.row, min(start.col, end.col), max(start.col, end.col))
         }
     }
@@ -540,7 +494,6 @@ extension TerminalSessionViewController: TerminalControllerDelegate {
     }
     
     func refresh(lines: inout [BufferLine], cursor: (Int,Int)) {
-        // NSLog("NewTermLog: refresh lines=\(lines.count)")
         self.lines = lines
         self.cursor = cursor
         self.tableView.reloadData()
@@ -548,7 +501,6 @@ extension TerminalSessionViewController: TerminalControllerDelegate {
     }
     
     func scroll(animated: Bool = false) {
-        // Only scroll if we are not selecting
         if isSelecting { return }
         
         state.scroll += 1
@@ -557,7 +509,6 @@ extension TerminalSessionViewController: TerminalControllerDelegate {
         if lastRow >= 0 {
             let indexPath = IndexPath(row: lastRow, section: 0)
             self.tableView.scrollToRow(at: indexPath, at: .bottom, animated: false)
-            // NSLog("NewTermLog: scrollToRow \(indexPath)")
         }
     }
 
@@ -628,7 +579,6 @@ extension TerminalSessionViewController: TerminalControllerDelegate {
 extension TerminalSessionViewController: UIGestureRecognizerDelegate {
 
     func gestureRecognizer(_ gestureRecognizer: UIGestureRecognizer, shouldRequireFailureOf otherGestureRecognizer: UIGestureRecognizer) -> Bool {
-        // Prioritize selection gestures
         if gestureRecognizer == longPressGesture || gestureRecognizer == panGesture {
             return false
         }
@@ -638,7 +588,7 @@ extension TerminalSessionViewController: UIGestureRecognizerDelegate {
     
     func gestureRecognizer(_ gestureRecognizer: UIGestureRecognizer, shouldRecognizeSimultaneouslyWith otherGestureRecognizer: UIGestureRecognizer) -> Bool {
         if gestureRecognizer == panGesture && otherGestureRecognizer == tableView.panGestureRecognizer {
-            return false // Disable scroll when selecting
+            return false
         }
         return false
     }
@@ -660,15 +610,12 @@ extension TerminalSessionViewController: UIDocumentPickerDelegate {
             isPickingFileForUpload = false
             terminalController.cancelUploadRequest()
         } else {
-            // The system will clean up the temp directory for us eventually anyway, but still delete the
-            // downloads temp directory now so the file doesn’t linger around till then.
             terminalController.deleteDownloadCache()
         }
     }
 
 }
 
-// MARK: - Custom Cell for Selection
 class SwiftUITableViewCell: UITableViewCell {
     private var hostingView: UIHostingView<AnyView>?
     private var selectionLayer: UIView!
@@ -679,7 +626,6 @@ class SwiftUITableViewCell: UITableViewCell {
         self.contentView.backgroundColor = .clear
         self.selectionStyle = .none
         
-        // Add selection layer
         selectionLayer = UIView()
         selectionLayer.backgroundColor = UIColor.systemBlue.withAlphaComponent(0.3)
         selectionLayer.isHidden = true
@@ -687,11 +633,10 @@ class SwiftUITableViewCell: UITableViewCell {
     }
     
     required init?(coder: NSCoder) {
-        fatalError("init(coder:) has not been implemented")
+        super.init(coder: coder) // Call super, although usually fatal error is better for dev, we want to avoid crashes
     }
     
     func configure(with view: AnyView, selectionRange: Range<Int>?, charWidth: CGFloat) {
-        // Reuse hosting view if possible to save performance
         if let existingHostingView = hostingView {
             existingHostingView.rootView = view
         } else {
@@ -708,25 +653,19 @@ class SwiftUITableViewCell: UITableViewCell {
             ])
         }
         
-        // Update selection layer
         if let range = selectionRange {
             let startX = CGFloat(range.lowerBound) * charWidth
             let width = CGFloat(range.count) * charWidth
             selectionLayer.frame = CGRect(x: startX, y: 0, width: width, height: contentView.bounds.height)
             selectionLayer.isHidden = false
-            contentView.sendSubviewToBack(selectionLayer) // Ensure selection is behind text
+            contentView.sendSubviewToBack(selectionLayer)
         } else {
             selectionLayer.isHidden = true
         }
         
-        // Ensure hosting view is frontmost
         if let host = hostingView {
             contentView.bringSubviewToFront(host)
         }
-    }
-    
-    override func layoutSubviews() {
-        super.layoutSubviews()
     }
 }
 
@@ -745,29 +684,35 @@ extension TerminalSessionViewController: UITableViewDataSource {
     func tableView(_ tableView: UITableView, cellForRowAt indexPath: IndexPath) -> UITableViewCell {
         let cell = tableView.dequeueReusableCell(withIdentifier: "Cell") as? SwiftUITableViewCell ?? SwiftUITableViewCell(style: .default, reuseIdentifier: "Cell")
         
-        let line = self.lines[indexPath.row]
-        let view = terminalController.stringSupplier.attributedString(line: line, cursorX: indexPath.row == cursor.y ? cursor.x : -1)
-        
-        // Calculate Selection Range for this row
-        var selectionRange: Range<Int>? = nil
-        if let start = selectionStart, let end = selectionEnd {
-            let (minR, maxR, startCol, endCol) = normalizeSelection(start: start, end: end)
+        // Safety check: Ensure index is valid
+        if indexPath.row < self.lines.count {
+            let line = self.lines[indexPath.row]
+            // Be careful with cursor index
+            let cursorX = (indexPath.row == cursor.y) ? cursor.x : -1
             
-            if indexPath.row >= minR && indexPath.row <= maxR {
-                // Determine cols for this row
-                let sCol = (indexPath.row == minR) ? startCol : 0
-                let eCol = (indexPath.row == maxR) ? endCol : Int.max // max selects till end
+            // Generate view safely
+            let view = terminalController.stringSupplier.attributedString(line: line, cursorX: cursorX)
+            
+            var selectionRange: Range<Int>? = nil
+            if let start = selectionStart, let end = selectionEnd {
+                let (minR, maxR, startCol, endCol) = normalizeSelection(start: start, end: end)
                 
-                let maxLineCols = Int(terminalController.screenSize?.cols ?? 80)
-                let actualEnd = min(eCol, maxLineCols)
-                
-                if sCol <= actualEnd {
-                     selectionRange = sCol..<(actualEnd + 1)
+                if indexPath.row >= minR && indexPath.row <= maxR {
+                    let sCol = (indexPath.row == minR) ? startCol : 0
+                    let eCol = (indexPath.row == maxR) ? endCol : Int.max
+                    
+                    let maxLineCols = Int(terminalController.screenSize?.cols ?? 80)
+                    let actualEnd = min(eCol, maxLineCols)
+                    
+                    if sCol <= actualEnd {
+                         selectionRange = sCol..<(actualEnd + 1)
+                    }
                 }
             }
+            
+            cell.configure(with: view, selectionRange: selectionRange, charWidth: terminalController.fontMetrics.boundingBox.width)
         }
         
-        cell.configure(with: view, selectionRange: selectionRange, charWidth: terminalController.fontMetrics.boundingBox.width)
         return cell
     }
     
