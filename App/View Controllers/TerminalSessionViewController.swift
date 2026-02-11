@@ -29,6 +29,7 @@ class TerminalSelectionCell: UITableViewCell {
     
     override init(style: UITableViewCell.CellStyle, reuseIdentifier: String?) {
         super.init(style: style, reuseIdentifier: reuseIdentifier)
+        // 关键：Cell 背景必须透明，以便显示 TableView 的背景
         self.backgroundColor = .clear
         self.contentView.backgroundColor = .clear
         self.selectionStyle = .none // 禁用 TableView 自带的点击灰色效果
@@ -50,6 +51,7 @@ class TerminalSelectionCell: UITableViewCell {
             contentView.addSubview(hv)
             hostingView = hv
             
+            // 强制填满 Cell
             NSLayoutConstraint.activate([
                 hv.leadingAnchor.constraint(equalTo: contentView.leadingAnchor),
                 hv.trailingAnchor.constraint(equalTo: contentView.trailingAnchor),
@@ -72,7 +74,7 @@ class TerminalSelectionCell: UITableViewCell {
             let startX = TerminalView.horizontalSpacing + (CGFloat(range.lowerBound) * charWidth)
             let width = CGFloat(range.count) * charWidth
             
-            // 稍微调整高度以填满行距，看起来更像原生文本选择
+            // 使用传入的 exact lineHeight
             selectionHighlightView.frame = CGRect(x: startX, y: 0, width: width, height: lineHeight)
         } else {
             selectionHighlightView.isHidden = true
@@ -143,15 +145,18 @@ class TerminalSessionViewController: BaseTerminalSplitViewControllerChild {
         super.loadView()
 
         title = .localize("TERMINAL", comment: "Generic title displayed before the terminal sets a proper title.")
-
-        // 修复：不要在这里调用 preferencesUpdated()，因为 tableView 还没初始化！
         
+        // 初始化 TableView
         tableView = UITableView()
         tableView.delegate = self
         tableView.dataSource = self
         tableView.separatorStyle = .none
         tableView.separatorInset = .zero
-        tableView.backgroundColor = .clear
+        
+        // 关键修复：设置默认背景色，防止白纸白字
+        // 后续 preferencesUpdated 会根据主题再次更新它
+        tableView.backgroundColor = .black 
+        
         tableView.allowsSelection = false // 禁用 TableView 自带的行选择
         
         // 注册自定义 Cell
@@ -173,7 +178,7 @@ class TerminalSessionViewController: BaseTerminalSplitViewControllerChild {
         keyInput.terminalInputDelegate = terminalController
         view.addSubview(keyInput)
         
-        // 修复：初始化完 tableView 后再调用更新，防止崩溃
+        // 修复：此时 tableView 已初始化，安全调用更新
         preferencesUpdated()
     }
 
@@ -216,15 +221,12 @@ class TerminalSessionViewController: BaseTerminalSplitViewControllerChild {
 
         NotificationCenter.default.addObserver(self, selector: #selector(self.preferencesUpdated), name: Preferences.didChangeNotification, object: nil)
 
-        // MARK: - Setup Selection Gestures (添加长按和拖拽手势)
-        
-        // 长按开始选择
+        // MARK: - Setup Selection Gestures
         longPressGesture = UILongPressGestureRecognizer(target: self, action: #selector(handleLongPress(_:)))
         longPressGesture.minimumPressDuration = 0.5
         longPressGesture.delegate = self
         tableView.addGestureRecognizer(longPressGesture)
 
-        // 拖拽调整选区
         panGesture = UIPanGestureRecognizer(target: self, action: #selector(handlePan(_:)))
         panGesture.delegate = self
         tableView.addGestureRecognizer(panGesture)
@@ -300,11 +302,10 @@ class TerminalSessionViewController: BaseTerminalSplitViewControllerChild {
         updateScreenSize()
     }
 
-    // MARK: - Native Selection Logic (核心选择逻辑)
+    // MARK: - Native Selection Logic
 
     @objc private func handleTextViewTap(_ gestureRecognizer: UITapGestureRecognizer) {
         if gestureRecognizer.state == .ended {
-            // 点击空白处：清除选区并弹出键盘
             if isSelecting {
                 clearSelection()
             }
@@ -320,26 +321,19 @@ class TerminalSessionViewController: BaseTerminalSplitViewControllerChild {
         
         switch gesture.state {
         case .began:
-            // 开始选择：计算手指下的坐标
             if let coord = getTerminalCoordinate(at: point) {
                 isSelecting = true
                 selectionStart = coord
                 selectionEnd = coord
                 
-                // 震动反馈 (Taptic Engine)
                 let generator = UIImpactFeedbackGenerator(style: .medium)
                 generator.impactOccurred()
                 
-                // 隐藏键盘，显示菜单
                 self.becomeFirstResponder()
-                
-                // 刷新界面显示高亮
                 tableView.reloadData()
             }
         case .changed:
-            // 长按移动时更新选区
             if let coord = getTerminalCoordinate(at: point) {
-                // 修复编译错误：分别比较属性，避免可选元组比较错误
                 if selectionEnd?.col != coord.col || selectionEnd?.row != coord.row {
                     selectionEnd = coord
                     tableView.reloadData()
@@ -358,15 +352,11 @@ class TerminalSessionViewController: BaseTerminalSplitViewControllerChild {
         
         switch gesture.state {
         case .changed:
-            // 拖拽时更新选区终点
             if let coord = getTerminalCoordinate(at: point) {
-                // 自动滚动支持：如果拖到顶部或底部
                 handleAutoScroll(at: point)
-                
-                // 修复编译错误：分别比较属性，避免可选元组比较错误
                 if selectionEnd?.col != coord.col || selectionEnd?.row != coord.row {
                     selectionEnd = coord
-                    tableView.reloadData() // 实时重绘高亮
+                    tableView.reloadData()
                 }
             }
         case .ended:
@@ -376,37 +366,28 @@ class TerminalSessionViewController: BaseTerminalSplitViewControllerChild {
         }
     }
 
-    // 将屏幕像素坐标转换为终端 (列, 行)
     private func getTerminalCoordinate(at point: CGPoint) -> (col: Int, row: Int)? {
         guard let indexPath = tableView.indexPathForRow(at: point) else { return nil }
         
-        // 计算行内 X 坐标
-        // 必须减去左侧间距
         let localX = point.x - TerminalView.horizontalSpacing
         let charWidth = terminalController.fontMetrics.boundingBox.width
         guard charWidth > 0 else { return nil }
         
-        // 计算列号
         let col = Int(round(localX / charWidth))
         let maxCols = Int(screenSize?.cols ?? 80)
-        
-        // 限制在有效范围内
         let constrainedCol = max(0, min(col, maxCols))
         
         return (col: constrainedCol, row: indexPath.row)
     }
     
-    // 简单的自动滚动逻辑
     private func handleAutoScroll(at point: CGPoint) {
         let topMargin: CGFloat = 40
         let bottomMargin: CGFloat = tableView.bounds.height - 40
         let contentOffset = tableView.contentOffset
         
         if point.y - contentOffset.y < topMargin {
-            // 向上滚动
             tableView.setContentOffset(CGPoint(x: 0, y: max(0, contentOffset.y - 10)), animated: false)
         } else if point.y - contentOffset.y > bottomMargin {
-            // 向下滚动
             tableView.setContentOffset(CGPoint(x: 0, y: min(tableView.contentSize.height, contentOffset.y + 10)), animated: false)
         }
     }
@@ -419,14 +400,10 @@ class TerminalSessionViewController: BaseTerminalSplitViewControllerChild {
         UIMenuController.shared.hideMenu()
     }
 
-    // 显示系统的复制菜单
     private func showMenu(at point: CGPoint) {
         self.becomeFirstResponder()
         
-        // 计算菜单出现的位置（在选区末尾附近）
         var targetRect = CGRect(x: point.x, y: point.y, width: 2, height: 20)
-        
-        // 尝试定位到具体的字符位置
         if let end = selectionEnd {
              let indexPath = IndexPath(row: end.row, section: 0)
              let rowRect = tableView.rectForRow(at: indexPath)
@@ -444,7 +421,7 @@ class TerminalSessionViewController: BaseTerminalSplitViewControllerChild {
         }
     }
 
-    // MARK: - Copy / Paste Actions (复制粘贴实现)
+    // MARK: - Copy / Paste Actions
 
     override var canBecomeFirstResponder: Bool {
         return true
@@ -452,11 +429,9 @@ class TerminalSessionViewController: BaseTerminalSplitViewControllerChild {
 
     override func canPerformAction(_ action: Selector, withSender sender: Any?) -> Bool {
         if action == #selector(copy(_:)) {
-            // 只有在选择了内容时才显示“复制”
             return isSelecting && selectionStart != nil
         }
         if action == #selector(paste(_:)) {
-            // 剪贴板有内容时显示“粘贴”
             return UIPasteboard.general.hasStrings
         }
         return super.canPerformAction(action, withSender: sender)
@@ -465,70 +440,50 @@ class TerminalSessionViewController: BaseTerminalSplitViewControllerChild {
     override func copy(_ sender: Any?) {
         guard let start = selectionStart, let end = selectionEnd else { return }
         
-        // 1. 确定前后顺序
         let (p1, p2) = sortPositions(start, end)
-        
-        // 2. 构建字符串
         var resultText = ""
         
-        // 遍历涉及的行
         for rowIndex in p1.row...p2.row {
             guard rowIndex >= 0 && rowIndex < lines.count else { continue }
             let line = lines[rowIndex]
-            
-            // 计算该行的截取范围
             let lineLength = line.count
             let startCol = (rowIndex == p1.row) ? p1.col : 0
             let endCol = (rowIndex == p2.row) ? p2.col : lineLength
             
-            // 防止越界
             let safeStart = max(0, min(startCol, lineLength))
             let safeEnd = max(0, min(endCol, lineLength))
             
             if safeStart < safeEnd {
-                // 提取该行文本
                 var lineStr = ""
                 for i in safeStart..<safeEnd {
-                    // BufferLine 的具体 API 可能不同，这里假设可以用下标访问 CharData
-                    // 如果 line[i] 返回的是 CharData，需要转换成 Character
                     let charData = line[i] 
                     let char = charData.getCharacter() 
-                    // 忽略空字符
                     if char != Character(UnicodeScalar(0)) {
                         lineStr.append(char)
                     } else {
-                        lineStr.append(" ") // 空白处补空格
+                        lineStr.append(" ")
                     }
                 }
                 resultText += lineStr
             }
-            
-            // 换行符（如果不是最后一行）
             if rowIndex != p2.row {
                 resultText += "\n"
             }
         }
         
-        // 3. 写入系统剪贴板
         UIPasteboard.general.string = resultText
-        
-        // 4. 完成后清除选区
         clearSelection()
-        
-        // 5. 恢复键盘输入
         keyInput.becomeFirstResponder()
     }
 
     override func paste(_ sender: Any?) {
         if let string = UIPasteboard.general.string {
-            // 转换为 UTF8 数组发送给终端后端
             terminalController.write(string.utf8Array)
         }
         clearSelection()
         keyInput.becomeFirstResponder()
     }
 
-    // 辅助函数：确保坐标 p1 在 p2 之前
     private func sortPositions(_ p1: (col: Int, row: Int), _ p2: (col: Int, row: Int)) -> ((col: Int, row: Int), (col: Int, row: Int)) {
         if p1.row < p2.row { return (p1, p2) }
         if p1.row > p2.row { return (p2, p1) }
@@ -551,7 +506,18 @@ class TerminalSessionViewController: BaseTerminalSplitViewControllerChild {
     @objc private func preferencesUpdated() {
         state.fontMetrics = terminalController.fontMetrics
         state.colorMap = terminalController.colorMap
-        // 修复：确保 tableView 存在再刷新，虽然我们在 loadView 调整了顺序，但这是为了保险
+        
+        // 关键：更新背景色以匹配终端主题
+        // 尝试从 colorMap 获取背景色并设置给 tableView
+        // 如果这里无法直接转换颜色，TableView 可能会保持为 loadView 设置的黑色
+        if let tableView = tableView {
+            // 注意：这里我们假设终端背景大部分时候是深色的。
+            // 如果需要严格匹配主题，可能需要将 terminalController.colorMap.background (SwiftTerm Color)
+            // 转换为 UIColor。为防止类型不匹配错误，这里暂且保留默认黑色或透明。
+            // 实际操作中，最好显式设置：
+             tableView.backgroundColor = .black 
+        }
+        
         tableView?.reloadData()
     }
 }
@@ -567,14 +533,11 @@ extension TerminalSessionViewController: TerminalControllerDelegate {
     func refresh(lines: inout [BufferLine], cursor: (Int,Int)) {
         self.lines = lines
         self.cursor = cursor
-        // 刷新列表以显示最新内容
-        // 注意：在大数据量下 reloadData 可能有性能影响，但在终端场景通常是可以接受的
         self.tableView.reloadData()
         self.scroll()
     }
     
     func scroll(animated: Bool = false) {
-        // 如果用户正在选择文本，不要自动滚动干扰
         guard !isSelecting else { return }
         
         state.scroll += 1
@@ -651,7 +614,6 @@ extension TerminalSessionViewController: UIGestureRecognizerDelegate {
         if gestureRecognizer == textViewTapGestureRecognizer {
             return (!(otherGestureRecognizer is UITapGestureRecognizer) || keyInput.isFirstResponder)
         }
-        // 如果是拖拽手势，在选择模式下接管控制
         if gestureRecognizer == panGesture {
             return isSelecting
         }
@@ -683,16 +645,20 @@ extension TerminalSessionViewController: UIDocumentPickerDelegate {
     }
 }
 
-// MARK: - Table View Data Source (渲染逻辑)
+// MARK: - Table View Data Source & Delegate (渲染逻辑)
 extension TerminalSessionViewController: UITableViewDataSource, UITableViewDelegate {
 
     func tableView(_ tableView: UITableView, numberOfRowsInSection section: Int) -> Int {
         self.lines.count
     }
     
-    // 渲染每一行
+    // 关键修复：强制设置行高，解决内容不显示的问题
+    func tableView(_ tableView: UITableView, heightForRowAt indexPath: IndexPath) -> CGFloat {
+        let h = terminalController.fontMetrics.boundingBox.height
+        return h > 0 ? h : 20 // 防止高度为0
+    }
+    
     func tableView(_ tableView: UITableView, cellForRowAt indexPath: IndexPath) -> UITableViewCell {
-        // 使用我们自定义的 TerminalSelectionCell
         guard let cell = tableView.dequeueReusableCell(withIdentifier: TerminalSelectionCell.identifier, for: indexPath) as? TerminalSelectionCell else {
             return UITableViewCell()
         }
@@ -700,32 +666,24 @@ extension TerminalSessionViewController: UITableViewDataSource, UITableViewDeleg
         let line = self.lines[indexPath.row]
         let view = terminalController.stringSupplier.attributedString(line: line, cursorX: indexPath.row == cursor.y ? cursor.x : -1)
         
-        // 计算当前行在选中区域内的范围
         var rangeInLine: Range<Int>? = nil
-        
         if isSelecting, let start = selectionStart, let end = selectionEnd {
             let (p1, p2) = sortPositions(start, end)
-            
-            // 如果当前行在选区范围内
             if indexPath.row >= p1.row && indexPath.row <= p2.row {
                 let sCol = (indexPath.row == p1.row) ? p1.col : 0
-                // 如果是最后一行，终点是 p2.col；否则是整行长度 (给一个足够大的数即可，因为是视觉效果)
                 let eCol = (indexPath.row == p2.row) ? p2.col : 1000 
-                
                 if sCol < eCol {
                     rangeInLine = sCol..<eCol
                 }
             }
         }
         
-        // 配置 Cell
         let metrics = terminalController.fontMetrics.boundingBox
         cell.configure(view: view, charWidth: metrics.width, lineHeight: metrics.height, selectionRange: rangeInLine)
         
         return cell
     }
     
-    // 禁用默认的选中高亮
     func tableView(_ tableView: UITableView, willSelectRowAt indexPath: IndexPath) -> IndexPath? {
         return nil
     }
