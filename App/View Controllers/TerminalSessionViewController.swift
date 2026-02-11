@@ -32,12 +32,12 @@ class TerminalSessionViewController: BaseTerminalSplitViewControllerChild {
     private var terminalController = TerminalController()
     private var keyInput = TerminalKeyInput(frame: .zero)
     
-    // 使用原生的 UITextView 替代 SwiftUI 视图
+    // 使用原生的 UITextView，保证100%原生选中体验
     private var nativeTextView: UITextView!
     
+    // 缓存一些状态
     private var state = TerminalState()
-    private var lines = [BufferLine]()
-    private var cursor = (x: Int(-1), y: Int(-1))
+    private var lastContentHeight: CGFloat = 0
 
     private var hudState = HUDViewState()
     private var hudView: UIHostingView<AnyView>!
@@ -71,15 +71,15 @@ class TerminalSessionViewController: BaseTerminalSplitViewControllerChild {
 
         // 1. 初始化原生的 UITextView
         nativeTextView = UITextView()
-        nativeTextView.isEditable = false       // 禁止直接编辑（只能通过键盘命令输入）
+        nativeTextView.isEditable = false       // 只读，但可选择
         nativeTextView.isSelectable = true      // 开启原生选中！
         nativeTextView.isScrollEnabled = true
         nativeTextView.showsVerticalScrollIndicator = true
-        nativeTextView.textContainerInset = UIEdgeInsets(top: 8, left: 5, bottom: 8, right: 5)
+        nativeTextView.textContainerInset = UIEdgeInsets(top: 8, left: 5, bottom: 20, right: 5)
         
-        // 外观设置：防止白屏，默认设为黑色背景，白色文字，等宽字体
-        nativeTextView.backgroundColor = .black
-        nativeTextView.textColor = .white
+        // 外观设置：深色背景，浅色文字
+        nativeTextView.backgroundColor = UIColor(red: 0.1, green: 0.1, blue: 0.1, alpha: 1.0)
+        nativeTextView.textColor = .lightGray
         nativeTextView.font = UIFont.monospacedSystemFont(ofSize: 12, weight: .regular)
         
         // 布局设置
@@ -98,25 +98,26 @@ class TerminalSessionViewController: BaseTerminalSplitViewControllerChild {
         keyInput.frame = view.bounds
         keyInput.autoresizingMask = [.flexibleWidth, .flexibleHeight]
         
-        // 将 keyInput 绑定到我们的 textView，这样点击 textView 就能弹出键盘
+        // 绑定键盘
         keyInput.textView = nativeTextView 
         
-        keyInput.keyboardToolbarHeightChanged = { height in
+        keyInput.keyboardToolbarHeightChanged = { [weak self] height in
+            guard let self = self else { return }
             self.keyboardToolbarHeightChanged?(height)
-            // 调整底部间距以适应键盘工具栏
-            let bottomInset = height
-            self.nativeTextView.contentInset.bottom = bottomInset
-            self.nativeTextView.verticalScrollIndicatorInsets.bottom = bottomInset
+            // 调整底部间距，防止键盘遮挡内容
+            var insets = self.nativeTextView.contentInset
+            insets.bottom = height
+            self.nativeTextView.contentInset = insets
+            self.nativeTextView.verticalScrollIndicatorInsets.bottom = height
         }
         
         keyInput.terminalInputDelegate = terminalController
         view.addSubview(keyInput)
         
-        // 点击手势：确保点击非文字区域也能唤起键盘
+        // 点击手势：点击唤起键盘
         let tap = UITapGestureRecognizer(target: self, action: #selector(handleTap))
         nativeTextView.addGestureRecognizer(tap)
         
-        // 初始化颜色配置
         preferencesUpdated()
     }
 
@@ -138,7 +139,7 @@ class TerminalSessionViewController: BaseTerminalSplitViewControllerChild {
             hudView.centerYAnchor.constraint(equalTo: view.safeAreaLayoutGuide.centerYAnchor)
         ])
 
-        // 快捷键命令
+        // 快捷键
         addKeyCommand(UIKeyCommand(title: .localize("CLEAR_TERMINAL", comment: "VoiceOver label for a button that clears the terminal."),
                                    image: UIImage(systemName: "text.badge.xmark"),
                                    action: #selector(self.clearTerminal),
@@ -153,7 +154,6 @@ class TerminalSessionViewController: BaseTerminalSplitViewControllerChild {
                                    modifierFlags: [ .command ]))
         #endif
 
-        // 通知监听
         if UIApplication.shared.supportsMultipleScenes {
             NotificationCenter.default.addObserver(self, selector: #selector(self.sceneDidEnterBackground), name: UIWindowScene.didEnterBackgroundNotification, object: nil)
             NotificationCenter.default.addObserver(self, selector: #selector(self.sceneWillEnterForeground), name: UIWindowScene.willEnterForegroundNotification, object: nil)
@@ -240,8 +240,6 @@ class TerminalSessionViewController: BaseTerminalSplitViewControllerChild {
         updateScreenSize()
     }
     
-    // MARK: - Controller Delegate & Rendering
-
     @objc private func sceneDidEnterBackground(_ notification: Notification) {
         if notification.object as? UIWindowScene == view.window?.windowScene {
             terminalController.windowDidEnterBackground()
@@ -255,69 +253,95 @@ class TerminalSessionViewController: BaseTerminalSplitViewControllerChild {
     }
 
     @objc private func preferencesUpdated() {
-        // 更新字体 - 修复了这里的编译错误
+        // 更新字体 (修复了之前的编译错误)
         let fontSize = CGFloat(Preferences.shared.fontSize)
-        let font = UIFont(name: Preferences.shared.fontName, size: fontSize) ?? UIFont.monospacedSystemFont(ofSize: fontSize, weight: .regular)
+        // 尝试加载自定义字体，如果失败则使用系统等宽字体
+        let fontName = Preferences.shared.fontName
+        let font: UIFont
+        if let customFont = UIFont(name: fontName, size: fontSize) {
+            font = customFont
+        } else {
+            font = UIFont.monospacedSystemFont(ofSize: fontSize, weight: .regular)
+        }
         nativeTextView.font = font
-        
-        // 更新颜色 (防止白底白字)
-        // 简单处理：深色背景，浅色文字
-        nativeTextView.backgroundColor = UIColor(red: 0.1, green: 0.1, blue: 0.1, alpha: 1.0) // 深灰/黑色
-        nativeTextView.textColor = .lightGray
         
         // 重新计算屏幕大小
         state.fontMetrics = terminalController.fontMetrics
         updateScreenSize()
     }
-}
-
-extension TerminalSessionViewController: TerminalControllerDelegate {
-
-    func refresh(lines: inout [AnyView]) {
-        // 忽略 SwiftUI 的 View 更新，我们使用下面的 BufferLine 更新
+    
+    // MARK: - 粘贴功能
+    override func paste(_ sender: Any?) {
+        // 拦截系统的粘贴，将内容发送给终端
+        if let string = UIPasteboard.general.string {
+            terminalController.write(string.utf8Array)
+        }
     }
     
-    // 核心渲染逻辑：将 BufferLine 转换为字符串显示在 UITextView 中
-    func refresh(lines: inout [BufferLine], cursor: (Int,Int)) {
-        self.lines = lines
-        self.cursor = cursor
-        
-        // 构建全文本字符串
-        var fullText = ""
-        for line in lines {
-            var lineStr = ""
-            for i in 0..<line.count {
-                let char = line[i].getCharacter()
-                // 替换空字符为空格，保证对齐
-                if char == Character(UnicodeScalar(0)) {
-                    lineStr.append(" ")
-                } else {
-                    lineStr.append(char)
-                }
-            }
-            // 去除行末多余空格，防止换行错乱 (可选)
-            // lineStr = lineStr.trimmingCharacters(in: .whitespaces)
-            fullText += lineStr + "\n"
+    override func canPerformAction(_ action: Selector, withSender sender: Any?) -> Bool {
+        // 允许粘贴
+        if action == #selector(paste(_:)) {
+            return true
         }
+        return super.canPerformAction(action, withSender: sender)
+    }
+}
+
+// MARK: - 核心渲染逻辑 (这里解决了白屏问题)
+extension TerminalSessionViewController: TerminalControllerDelegate {
+
+    // NewTerm 会调用这个方法来刷新 UI
+    func refresh(lines: inout [AnyView]) {
+        // 我们不使用传入的 [AnyView]，因为那是给 SwiftUI 用的。
+        // 我们直接从 terminal 实例中拉取原始文本数据。
         
-        // 更新 UI (必须在主线程)
+        guard let terminal = terminalController.terminal else { return }
+        
+        // 放在主线程更新 UI
         DispatchQueue.main.async { [weak self] in
             guard let self = self else { return }
             
-            // 记录当前的滚动状态
-            let isAtBottom = self.nativeTextView.contentOffset.y >= (self.nativeTextView.contentSize.height - self.nativeTextView.bounds.height - 20)
+            // 构建全文本字符串
+            var fullText = ""
+            let bufferLines = terminal.buffer.lines
             
-            // 设置文本
-            // 注意：频繁设置 text 可能会重置选中状态，这是原生 TextView 的特性
-            // 但为了实现原生选中，这是必须的权衡
-            self.nativeTextView.text = fullText
+            // 遍历所有行
+            for i in 0..<bufferLines.count {
+                let line = bufferLines[i]
+                var lineStr = ""
+                // 遍历行内的字符
+                for j in 0..<line.count {
+                    let charData = line[j]
+                    let char = charData.getCharacter()
+                    // 替换空字符为空格，保持排版
+                    if char == Character(UnicodeScalar(0)) {
+                        lineStr.append(" ")
+                    } else {
+                        lineStr.append(char)
+                    }
+                }
+                // 每行结束加换行符
+                fullText += lineStr + "\n"
+            }
             
-            // 如果之前在底部，保持在底部
-            if isAtBottom {
-                let bottomRange = NSRange(location: self.nativeTextView.text.count - 1, length: 1)
-                self.nativeTextView.scrollRangeToVisible(bottomRange)
+            // 只有当内容发生变化时才更新，避免光标跳动
+            if self.nativeTextView.text != fullText {
+                // 检查是否需要自动滚动到底部
+                let isAtBottom = self.nativeTextView.contentOffset.y >= (self.nativeTextView.contentSize.height - self.nativeTextView.bounds.height - 30)
+                
+                self.nativeTextView.text = fullText
+                
+                if isAtBottom {
+                    let bottomRange = NSRange(location: self.nativeTextView.text.count - 1, length: 1)
+                    self.nativeTextView.scrollRangeToVisible(bottomRange)
+                }
             }
         }
+    }
+    
+    // 这个方法是为了兼容性保留的，NewTerm 可能不会调用它
+    func refresh(lines: inout [BufferLine], cursor: (Int,Int)) {
+        // 留空
     }
     
     func scroll(animated: Bool = false) {
