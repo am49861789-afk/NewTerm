@@ -53,16 +53,15 @@ class TerminalSessionViewController: BaseTerminalSplitViewControllerChild {
     private var hasAppeared = false
     private var hasStarted = false
     private var failureError: Error?
-    private var lastAutomaticScrollOffset = CGPoint.zero
-    private var invertScrollToTop = false
+    
+    // Prevent auto-scroll conflict during selection
+    private var isManualScrolling = false
 
     private var isPickingFileForUpload = false
 
     override init(nibName nibNameOrNil: String?, bundle nibBundleOrNil: Bundle?) {
         super.init(nibName: nibNameOrNil, bundle: nibBundleOrNil)
         terminalController.delegate = self
-        // REMOVED: startSubProcess here. It's too early and causes crashes if callbacks fire before loadView.
-        // We will start it in viewDidLoad.
     }
 
     required init?(coder: NSCoder) {
@@ -82,11 +81,15 @@ class TerminalSessionViewController: BaseTerminalSplitViewControllerChild {
         tableView.separatorInset = .zero
         tableView.backgroundColor = .clear
         tableView.allowsSelection = false 
+        // Important: Delays content touches so our gestures work first
+        tableView.delaysContentTouches = false
         
         textView = tableView
 
         textViewTapGestureRecognizer = UITapGestureRecognizer(target: self, action: #selector(self.handleTextViewTap(_:)))
         textViewTapGestureRecognizer.delegate = self
+        // Ensure tap doesn't block other controls unless strictly needed
+        textViewTapGestureRecognizer.cancelsTouchesInView = false 
         textView.addGestureRecognizer(textViewTapGestureRecognizer)
         
         // --- Add Selection Gestures ---
@@ -109,7 +112,6 @@ class TerminalSessionViewController: BaseTerminalSplitViewControllerChild {
         keyInput.terminalInputDelegate = terminalController
         view.addSubview(keyInput)
         
-        // Safe to update preferences now that views exist
         preferencesUpdated()
     }
 
@@ -137,10 +139,17 @@ class TerminalSessionViewController: BaseTerminalSplitViewControllerChild {
                                                              input: "k",
                                                              modifierFlags: .command))
         
+        // Add Copy/Paste commands
         addKeyCommand(UIKeyCommand(title: .localize("COPY", comment: "Copy text"),
                                    image: UIImage(systemName: "doc.on.doc"),
                                    action: #selector(self.copy(_:)),
                                    input: "c",
+                                   modifierFlags: .command))
+        
+        addKeyCommand(UIKeyCommand(title: .localize("PASTE", comment: "Paste text"),
+                                   image: UIImage(systemName: "doc.on.clipboard"),
+                                   action: #selector(self.paste(_:)),
+                                   input: "v",
                                    modifierFlags: .command))
 
         #if !targetEnvironment(macCatalyst)
@@ -158,8 +167,7 @@ class TerminalSessionViewController: BaseTerminalSplitViewControllerChild {
 
         NotificationCenter.default.addObserver(self, selector: #selector(self.preferencesUpdated), name: Preferences.didChangeNotification, object: nil)
         
-        // --- MOVED STARTUP HERE ---
-        // Start the process only when the view is loaded to prevent delegate crashes
+        // Start process safely
         if !hasStarted {
             do {
                 try terminalController.startSubProcess()
@@ -207,48 +215,16 @@ class TerminalSessionViewController: BaseTerminalSplitViewControllerChild {
         hasAppeared = false
     }
     
-    override func viewWillTransition(to size: CGSize, with coordinator: UIViewControllerTransitionCoordinator) {
-        super.viewWillTransition(to: size, with: coordinator)
-        if UIDevice.current.userInterfaceIdiom == .pad {
-            if keyInput.isFirstResponder {
-                keyInput.resignFirstResponder()
-            }
-        }
+    // MARK: - Focus Management
+    
+    // We override these to ensure keyInput stays the responder even when we present menus
+    override var canBecomeFirstResponder: Bool {
+        return false // Let keyInput handle it
     }
     
-    override func viewWillLayoutSubviews() {
-        super.viewWillLayoutSubviews()
-        updateScreenSize()
-    }
-    
-    override func viewDidLayoutSubviews() {
-        super.viewDidLayoutSubviews()
-    }
-
-    override func viewSafeAreaInsetsDidChange() {
-        super.viewSafeAreaInsetsDidChange()
-    }
-
-    override func traitCollectionDidChange(_ previousTraitCollection: UITraitCollection?) {
-        super.traitCollectionDidChange(previousTraitCollection)
-    }
-
-    override func removeFromParent() {
-        if hasStarted {
-            do {
-                try terminalController.stopSubProcess()
-            } catch {
-                Logger().error("Failed to stop subprocess: \(String(describing: error))")
-            }
-        }
-
-        super.removeFromParent()
-    }
-
     // MARK: - Screen
 
     func updateScreenSize() {
-        // Fix: Guard against view not being loaded
         guard isViewLoaded, let _ = textView else { return }
         
         if isSplitViewResizing {
@@ -259,18 +235,11 @@ class TerminalSessionViewController: BaseTerminalSplitViewControllerChild {
         layoutSize.width -= TerminalView.horizontalSpacing * 2
         layoutSize.height -= TerminalView.verticalSpacing * 2
 
-        // Safety Check 1: Ensure layout size is positive
         if layoutSize.width <= 1 || layoutSize.height <= 1 {
             return
         }
         
-        let layoutFrame1 = self.view.safeAreaLayoutGuide.layoutFrame
-        if layoutFrame1.origin.x < 0 || layoutFrame1.origin.y < 0 {
-            return
-        }
-
         let glyphSize = terminalController.fontMetrics.boundingBox
-        // Safety Check 2: Ensure glyph size is valid
         if glyphSize.width <= 0.1 || glyphSize.height <= 0.1 {
             return
         }
@@ -283,8 +252,7 @@ class TerminalSessionViewController: BaseTerminalSplitViewControllerChild {
         if screenSize != newSize {
             screenSize = newSize
             delegate?.terminal(viewController: self, screenSizeDidChange: newSize)
-        }
-        else {
+        } else {
             self.scroll(animated: true)
         }
     }
@@ -296,7 +264,6 @@ class TerminalSessionViewController: BaseTerminalSplitViewControllerChild {
 
     private func updateIsSplitViewResizing() {
         state.isSplitViewResizing = isSplitViewResizing
-
         if !isSplitViewResizing {
             updateScreenSize()
         }
@@ -329,20 +296,25 @@ class TerminalSessionViewController: BaseTerminalSplitViewControllerChild {
 
     @objc private func handleLongPress(_ gesture: UILongPressGestureRecognizer) {
         guard isViewLoaded else { return }
-        let point = gesture.location(in: tableView)
         
         switch gesture.state {
         case .began:
+            let point = gesture.location(in: tableView)
             if let gridPos = locationToGrid(point: point) {
                 let generator = UIImpactFeedbackGenerator(style: .medium)
                 generator.impactOccurred()
                 
                 isSelecting = true
+                isManualScrolling = true
+                
+                // Select at least one character
                 selectionStart = gridPos
                 selectionEnd = gridPos
                 
-                showMenuController(at: point)
                 tableView.reloadData()
+                
+                // Show Menu Controller
+                showMenuController(at: point)
             }
         default:
             break
@@ -359,11 +331,15 @@ class TerminalSessionViewController: BaseTerminalSplitViewControllerChild {
                 if let gridPos = locationToGrid(point: point) {
                     selectionEnd = gridPos
                     tableView.reloadData()
+                    
+                    // Hide menu while dragging
+                    UIMenuController.shared.hideMenu()
                 }
             }
         case .ended:
             if isSelecting {
-                 showMenuController(at: point)
+                isManualScrolling = false
+                showMenuController(at: point)
             }
         default:
             break
@@ -375,18 +351,27 @@ class TerminalSessionViewController: BaseTerminalSplitViewControllerChild {
         selectionStart = nil
         selectionEnd = nil
         isSelecting = false
+        isManualScrolling = false
         tableView.reloadData()
         UIMenuController.shared.hideMenu()
+        
+        // Ensure input focus
+        if !keyInput.isFirstResponder {
+            keyInput.becomeFirstResponder()
+        }
     }
     
     private func showMenuController(at point: CGPoint) {
-        guard let _ = selectionStart, let _ = selectionEnd else { return }
+        // Crucial: Ensure keyInput IS the responder.
+        if !keyInput.isFirstResponder {
+            keyInput.becomeFirstResponder()
+        }
         
-        becomeFirstResponder()
         let menu = UIMenuController.shared
-        
         let rect = CGRect(x: point.x, y: point.y - 20, width: 1, height: 1)
         
+        // Use keyInput as the anchor logic if possible, but here we attach to tableView
+        // Since keyInput is first responder, the actions will bubble up.
         if #available(iOS 13.0, *) {
             menu.showMenu(from: tableView, rect: rect)
         } else {
@@ -397,23 +382,34 @@ class TerminalSessionViewController: BaseTerminalSplitViewControllerChild {
 
     @objc private func handleTextViewTap(_ gestureRecognizer: UITapGestureRecognizer) {
         if gestureRecognizer.state == .ended {
+            // Tap outside clears selection
             if isSelecting {
                 clearSelection()
-            }
-            if !keyInput.isFirstResponder {
-                keyInput.becomeFirstResponder()
-                delegate?.terminalDidBecomeActive(viewController: self)
+            } else {
+                // If not selecting, maybe show paste menu?
+                // For now, just ensure focus
+                if !keyInput.isFirstResponder {
+                    keyInput.becomeFirstResponder()
+                }
             }
         }
     }
     
     // MARK: - Copy / Paste Logic
     
+    // This function is called on the Responder Chain. Since keyInput is FirstResponder, 
+    // and it likely doesn't handle these, they bubble up to us (Parent VC).
     override func canPerformAction(_ action: Selector, withSender sender: Any?) -> Bool {
         if action == #selector(copy(_:)) {
-            return isSelecting
+            // Only allow copy if we actually have a selection
+            return isSelecting && selectionStart != nil
         }
-        return super.canPerformAction(action, withSender: sender)
+        if action == #selector(paste(_:)) {
+            // Always allow paste if we are valid
+            return UIPasteboard.general.hasStrings
+        }
+        // Hide other options to avoid confusion
+        return false
     }
     
     override func copy(_ sender: Any?) {
@@ -421,6 +417,16 @@ class TerminalSessionViewController: BaseTerminalSplitViewControllerChild {
         
         let text = getSelectedText(start: start, end: end)
         UIPasteboard.general.string = text
+        
+        // Optional: clear selection after copy?
+        // clearSelection() // User preference usually dictates this. Standard iOS keeps selection.
+    }
+    
+    override func paste(_ sender: Any?) {
+        if let text = UIPasteboard.general.string, let data = text.data(using: .utf8) {
+            terminalController.write(data)
+            clearSelection()
+        }
     }
     
     private func getSelectedText(start: (col: Int, row: Int), end: (col: Int, row: Int)) -> String {
@@ -438,7 +444,9 @@ class TerminalSessionViewController: BaseTerminalSplitViewControllerChild {
                 
                 if let termLine = term.getLine(row: targetRow) {
                      let str = termLine.translateToString()
+                     // Safety trim
                      let len = str.count
+                     
                      var s = 0
                      var e = len
                      
@@ -446,6 +454,9 @@ class TerminalSessionViewController: BaseTerminalSplitViewControllerChild {
                          s = min(len, startCol)
                      }
                      if rowIndex == safeMaxRow {
+                         // endCol is inclusive index in UI, but exclusive in Substring usually.
+                         // endCol logic: if user selects col 0 to 0. It is 1 char. 
+                         // Logic below adds +1
                          e = min(len, endCol + 1)
                      }
                      
@@ -500,14 +511,12 @@ class TerminalSessionViewController: BaseTerminalSplitViewControllerChild {
 extension TerminalSessionViewController: TerminalControllerDelegate {
 
     func refresh(lines: inout [AnyView]) {
-        // Fix: Ensure view is loaded before refreshing
         guard isViewLoaded, tableView != nil else { return }
         state.lines = lines
         self.scroll()
     }
     
     func refresh(lines: inout [BufferLine], cursor: (Int,Int)) {
-        // Fix: Ensure view is loaded before refreshing
         guard isViewLoaded, tableView != nil else { return }
         self.lines = lines
         self.cursor = cursor
@@ -516,9 +525,8 @@ extension TerminalSessionViewController: TerminalControllerDelegate {
     }
     
     func scroll(animated: Bool = false) {
-        // Fix: Ensure view is loaded
         guard isViewLoaded, tableView != nil else { return }
-        if isSelecting { return }
+        if isSelecting || isManualScrolling { return }
         
         state.scroll += 1
         
@@ -719,6 +727,9 @@ extension TerminalSessionViewController: UITableViewDataSource {
                     let actualEnd = min(eCol, maxLineCols)
                     
                     if sCol <= actualEnd {
+                         // Ensure we select at least one char if start==end?
+                         // The logic uses ..< (actualEnd + 1). 
+                         // If startCol=5, endCol=5. sCol=5, actualEnd=5. Range 5..<6. Width 1. This is correct.
                          selectionRange = sCol..<(actualEnd + 1)
                     }
                 }
