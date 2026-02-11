@@ -13,29 +13,26 @@ import SwiftUIX
 import SwiftTerm
 import NewTermCommon
 
-// 自定义 Cell 用于绘制原生风格的蓝色选区背景
-class TerminalSelectionCell: UITableViewCell {
-    static let identifier = "TerminalSelectionCell"
+// 定义一个最基础的 Cell，用来承载 SwiftUI 内容和我们的选中效果
+class SwiftUITableViewCell: UITableViewCell {
+    static let identifier = "SwiftUITableViewCell"
     
-    // 用于显示内容的 SwiftUI Hosting Controller
-    private var hostingView: UIHostingView<AnyView>?
-    // 用于显示选中高亮的蓝色视图
-    private var selectionHighlightView: UIView = {
+    var hostingView: UIHostingView<AnyView>?
+    var selectionView: UIView = {
         let v = UIView()
-        v.backgroundColor = UIColor.tintColor.withAlphaComponent(0.3) // 原生蓝色半透明
+        v.backgroundColor = UIColor.tintColor.withAlphaComponent(0.3) // 选中时的淡蓝色
         v.isHidden = true
         return v
     }()
     
     override init(style: UITableViewCell.CellStyle, reuseIdentifier: String?) {
         super.init(style: style, reuseIdentifier: reuseIdentifier)
-        // 关键：Cell 背景必须透明，以便显示 TableView 的背景
         self.backgroundColor = .clear
         self.contentView.backgroundColor = .clear
-        self.selectionStyle = .none // 禁用 TableView 自带的点击灰色效果
+        self.selectionStyle = .none
         
-        // 添加高亮层 (在最底层)
-        contentView.addSubview(selectionHighlightView)
+        // 添加选中层
+        contentView.addSubview(selectionView)
     }
     
     required init?(coder: NSCoder) {
@@ -43,7 +40,7 @@ class TerminalSelectionCell: UITableViewCell {
     }
     
     func configure(view: AnyView, charWidth: CGFloat, lineHeight: CGFloat, selectionRange: Range<Int>?) {
-        // 1. 配置 SwiftUI 内容
+        // 1. 设置 SwiftUI 视图
         if hostingView == nil {
             let hv = UIHostingView(rootView: view)
             hv.backgroundColor = .clear
@@ -51,7 +48,7 @@ class TerminalSelectionCell: UITableViewCell {
             contentView.addSubview(hv)
             hostingView = hv
             
-            // 强制填满 Cell
+            // 充满整个 Cell
             NSLayoutConstraint.activate([
                 hv.leadingAnchor.constraint(equalTo: contentView.leadingAnchor),
                 hv.trailingAnchor.constraint(equalTo: contentView.trailingAnchor),
@@ -62,22 +59,18 @@ class TerminalSelectionCell: UITableViewCell {
             hostingView?.rootView = view
         }
         
-        // 确保高亮层在文字下方
-        contentView.sendSubviewToBack(selectionHighlightView)
+        // 确保选中层在文字下方
+        contentView.sendSubviewToBack(selectionView)
         
-        // 2. 绘制选区 (Native Selection Look)
+        // 2. 更新选中状态
         if let range = selectionRange {
-            selectionHighlightView.isHidden = false
-            
-            // 计算高亮区域的 Frame
-            // x = 左边距 + (起始字符 * 字符宽度)
+            selectionView.isHidden = false
             let startX = TerminalView.horizontalSpacing + (CGFloat(range.lowerBound) * charWidth)
             let width = CGFloat(range.count) * charWidth
-            
-            // 使用传入的 exact lineHeight
-            selectionHighlightView.frame = CGRect(x: startX, y: 0, width: width, height: lineHeight)
+            // 这里的 frame 高度直接取行高，确保对齐
+            selectionView.frame = CGRect(x: startX, y: 0, width: width, height: lineHeight)
         } else {
-            selectionHighlightView.isHidden = true
+            selectionView.isHidden = true
         }
     }
 }
@@ -117,7 +110,7 @@ class TerminalSessionViewController: BaseTerminalSplitViewControllerChild {
     
     private var isPickingFileForUpload = false
 
-    // MARK: - Native Selection Properties (原生选择功能变量)
+    // MARK: - 选中功能变量
     private var selectionStart: (col: Int, row: Int)?
     private var selectionEnd: (col: Int, row: Int)?
     private var isSelecting = false
@@ -145,26 +138,22 @@ class TerminalSessionViewController: BaseTerminalSplitViewControllerChild {
         super.loadView()
 
         title = .localize("TERMINAL", comment: "Generic title displayed before the terminal sets a proper title.")
-        
+
         // 初始化 TableView
         tableView = UITableView()
         tableView.delegate = self
         tableView.dataSource = self
         tableView.separatorStyle = .none
         tableView.separatorInset = .zero
+        tableView.backgroundColor = .clear // 保持透明，使用 App 原有背景
+        tableView.allowsSelection = false  // 禁用原生点击
         
-        // 关键修复：设置默认背景色，防止白纸白字
-        // 后续 preferencesUpdated 会根据主题再次更新它
-        tableView.backgroundColor = .black 
-        
-        tableView.allowsSelection = false // 禁用 TableView 自带的行选择
-        
-        // 注册自定义 Cell
-        tableView.register(TerminalSelectionCell.self, forCellReuseIdentifier: TerminalSelectionCell.identifier)
+        // 注册 Cell
+        tableView.register(SwiftUITableViewCell.self, forCellReuseIdentifier: SwiftUITableViewCell.identifier)
         
         textView = tableView
 
-        // 点击空白处取消选择 / 唤起键盘
+        // 点击空白处
         textViewTapGestureRecognizer = UITapGestureRecognizer(target: self, action: #selector(self.handleTextViewTap(_:)))
         textViewTapGestureRecognizer.delegate = self
         textView.addGestureRecognizer(textViewTapGestureRecognizer)
@@ -178,7 +167,7 @@ class TerminalSessionViewController: BaseTerminalSplitViewControllerChild {
         keyInput.terminalInputDelegate = terminalController
         view.addSubview(keyInput)
         
-        // 修复：此时 tableView 已初始化，安全调用更新
+        // 修复闪退：确保 View 初始化完毕后再更新配置
         preferencesUpdated()
     }
 
@@ -221,7 +210,7 @@ class TerminalSessionViewController: BaseTerminalSplitViewControllerChild {
 
         NotificationCenter.default.addObserver(self, selector: #selector(self.preferencesUpdated), name: Preferences.didChangeNotification, object: nil)
 
-        // MARK: - Setup Selection Gestures
+        // 添加手势
         longPressGesture = UILongPressGestureRecognizer(target: self, action: #selector(handleLongPress(_:)))
         longPressGesture.minimumPressDuration = 0.5
         longPressGesture.delegate = self
@@ -265,7 +254,7 @@ class TerminalSessionViewController: BaseTerminalSplitViewControllerChild {
         hasAppeared = false
     }
 
-    // MARK: - Screen Update
+    // MARK: - 屏幕更新逻辑
     func updateScreenSize() {
         if isSplitViewResizing { return }
 
@@ -302,7 +291,7 @@ class TerminalSessionViewController: BaseTerminalSplitViewControllerChild {
         updateScreenSize()
     }
 
-    // MARK: - Native Selection Logic
+    // MARK: - 核心选中逻辑
 
     @objc private func handleTextViewTap(_ gestureRecognizer: UITapGestureRecognizer) {
         if gestureRecognizer.state == .ended {
@@ -334,6 +323,7 @@ class TerminalSessionViewController: BaseTerminalSplitViewControllerChild {
             }
         case .changed:
             if let coord = getTerminalCoordinate(at: point) {
+                // 单独比较属性，避免可选类型比较错误
                 if selectionEnd?.col != coord.col || selectionEnd?.row != coord.row {
                     selectionEnd = coord
                     tableView.reloadData()
@@ -421,7 +411,7 @@ class TerminalSessionViewController: BaseTerminalSplitViewControllerChild {
         }
     }
 
-    // MARK: - Copy / Paste Actions
+    // MARK: - 复制 / 粘贴
 
     override var canBecomeFirstResponder: Bool {
         return true
@@ -490,7 +480,7 @@ class TerminalSessionViewController: BaseTerminalSplitViewControllerChild {
         return p1.col < p2.col ? (p1, p2) : (p2, p1)
     }
 
-    // MARK: - Lifecycle Handlers
+    // MARK: - 生命周期与设置更新
     @objc private func sceneDidEnterBackground(_ notification: Notification) {
         if notification.object as? UIWindowScene == view.window?.windowScene {
             terminalController.windowDidEnterBackground()
@@ -507,18 +497,11 @@ class TerminalSessionViewController: BaseTerminalSplitViewControllerChild {
         state.fontMetrics = terminalController.fontMetrics
         state.colorMap = terminalController.colorMap
         
-        // 关键：更新背景色以匹配终端主题
-        // 尝试从 colorMap 获取背景色并设置给 tableView
-        // 如果这里无法直接转换颜色，TableView 可能会保持为 loadView 设置的黑色
+        // 关键修复：设置全局行高。这样 TableView 就知道每个 Cell 该多高，避免空白。
         if let tableView = tableView {
-            // 注意：这里我们假设终端背景大部分时候是深色的。
-            // 如果需要严格匹配主题，可能需要将 terminalController.colorMap.background (SwiftTerm Color)
-            // 转换为 UIColor。为防止类型不匹配错误，这里暂且保留默认黑色或透明。
-            // 实际操作中，最好显式设置：
-             tableView.backgroundColor = .black 
+            tableView.rowHeight = terminalController.fontMetrics.boundingBox.height
+            tableView.reloadData()
         }
-        
-        tableView?.reloadData()
     }
 }
 
@@ -645,21 +628,15 @@ extension TerminalSessionViewController: UIDocumentPickerDelegate {
     }
 }
 
-// MARK: - Table View Data Source & Delegate (渲染逻辑)
+// MARK: - Table View Data Source (渲染逻辑)
 extension TerminalSessionViewController: UITableViewDataSource, UITableViewDelegate {
 
     func tableView(_ tableView: UITableView, numberOfRowsInSection section: Int) -> Int {
         self.lines.count
     }
     
-    // 关键修复：强制设置行高，解决内容不显示的问题
-    func tableView(_ tableView: UITableView, heightForRowAt indexPath: IndexPath) -> CGFloat {
-        let h = terminalController.fontMetrics.boundingBox.height
-        return h > 0 ? h : 20 // 防止高度为0
-    }
-    
     func tableView(_ tableView: UITableView, cellForRowAt indexPath: IndexPath) -> UITableViewCell {
-        guard let cell = tableView.dequeueReusableCell(withIdentifier: TerminalSelectionCell.identifier, for: indexPath) as? TerminalSelectionCell else {
+        guard let cell = tableView.dequeueReusableCell(withIdentifier: SwiftUITableViewCell.identifier, for: indexPath) as? SwiftUITableViewCell else {
             return UITableViewCell()
         }
         
@@ -688,4 +665,3 @@ extension TerminalSessionViewController: UITableViewDataSource, UITableViewDeleg
         return nil
     }
 }
- 
