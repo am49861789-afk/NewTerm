@@ -458,3 +458,20 @@ extension TerminalController: SubProcessDelegate {
     }
 
 }
+
+// MARK: - Protocol Conformance Fix
+extension TerminalController: TerminalInputProtocol {
+    public func receiveKeyboardInput(data: [UTF8Char]) {
+        self.write(data)
+    }
+    
+    public var applicationCursor: Bool {
+        return self.terminal?.applicationCursor ?? false
+    }
+    
+    // We return nil here because selection is handled by the View Controller now.
+    // However, the protocol requires this method.
+    public func getAllText() -> String? {
+        return nil
+    }
+}
