@@ -32,7 +32,7 @@ class TerminalSessionViewController: BaseTerminalSplitViewControllerChild {
     private var terminalController = TerminalController()
     private var keyInput = TerminalKeyInput(frame: .zero)
     
-    // 修改：使用原生的 UITextView 替代 SwiftUI 视图
+    // 使用原生的 UITextView 替代 SwiftUI 视图
     private var nativeTextView: UITextView!
     
     private var state = TerminalState()
@@ -91,7 +91,7 @@ class TerminalSessionViewController: BaseTerminalSplitViewControllerChild {
             nativeTextView.leadingAnchor.constraint(equalTo: view.safeAreaLayoutGuide.leadingAnchor),
             nativeTextView.trailingAnchor.constraint(equalTo: view.safeAreaLayoutGuide.trailingAnchor),
             nativeTextView.topAnchor.constraint(equalTo: view.safeAreaLayoutGuide.topAnchor),
-            nativeTextView.bottomAnchor.constraint(equalTo: view.bottomAnchor) // 键盘会自动调整这个
+            nativeTextView.bottomAnchor.constraint(equalTo: view.bottomAnchor)
         ])
         
         // 2. 键盘输入处理
@@ -255,11 +255,10 @@ class TerminalSessionViewController: BaseTerminalSplitViewControllerChild {
     }
 
     @objc private func preferencesUpdated() {
-        // 更新字体
+        // 更新字体 - 修复了这里的编译错误
         let fontSize = CGFloat(Preferences.shared.fontSize)
-        if let font = UIFont(name: Preferences.shared.fontName, size: fontSize) ?? UIFont.monospacedSystemFont(ofSize: fontSize, weight: .regular) {
-            nativeTextView.font = font
-        }
+        let font = UIFont(name: Preferences.shared.fontName, size: fontSize) ?? UIFont.monospacedSystemFont(ofSize: fontSize, weight: .regular)
+        nativeTextView.font = font
         
         // 更新颜色 (防止白底白字)
         // 简单处理：深色背景，浅色文字
