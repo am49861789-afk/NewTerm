@@ -17,11 +17,13 @@ import NewTermCommon
 class TerminalTextView: UITextView {
     var onPaste: ((String) -> Void)?
     
+    // 允许粘贴操作
     override func canPerformAction(_ action: Selector, withSender sender: Any?) -> Bool {
         if action == #selector(paste(_:)) { return true }
         return super.canPerformAction(action, withSender: sender)
     }
     
+    // 拦截粘贴内容发送给终端
     override func paste(_ sender: Any?) {
         if let string = UIPasteboard.general.string {
             onPaste?(string)
@@ -31,9 +33,29 @@ class TerminalTextView: UITextView {
 
 class TerminalSessionViewController: BaseTerminalSplitViewControllerChild {
 
+    // MARK: - Public Properties (修复访问权限错误)
+    
     var keyboardToolbarHeightChanged: ((Double) -> Void)?
     
-    // 界面组件
+    // 修复：必须是 internal/public，因为 RootViewController 会访问它
+    var initialCommand: String?
+    
+    // 修复：添加 delegate 属性，解决调用 delegate? 报错的问题
+    weak var delegate: TerminalSessionViewControllerDelegate?
+
+    override var isSplitViewResizing: Bool {
+        didSet { updateIsSplitViewResizing() }
+    }
+    override var showsTitleView: Bool {
+        didSet { updateShowsTitleView() }
+    }
+    override var screenSize: ScreenSize? {
+        get { terminalController.screenSize }
+        set { terminalController.screenSize = newValue }
+    }
+
+    // MARK: - Private Properties
+    
     private var nativeTextView: TerminalTextView!
     private var terminalController = TerminalController()
     private var keyInput = TerminalKeyInput(frame: .zero)
@@ -44,14 +66,12 @@ class TerminalSessionViewController: BaseTerminalSplitViewControllerChild {
     // 核心：定时器，用于强制刷新屏幕
     private var refreshTimer: Timer?
     
-    // 状态缓存
     private var lastTextContent: String = ""
     private var state = TerminalState()
     private var hudState = HUDViewState()
     private var hudView: UIHostingView<AnyView>!
     private var hasAppeared = false
     private var failureError: Error?
-    private var initialCommand: String?
     private var isPickingFileForUpload = false
     
     // MARK: - Init & Load
@@ -60,9 +80,7 @@ class TerminalSessionViewController: BaseTerminalSplitViewControllerChild {
         super.init(nibName: nibNameOrNil, bundle: nibBundleOrNil)
         terminalController.delegate = self
         
-        // ---------------------------------------------------------
         // 黑科技：通过 Mirror 暴力获取 internal 属性 'terminal'
-        // ---------------------------------------------------------
         let mirror = Mirror(reflecting: terminalController)
         for child in mirror.children {
             if child.label == "terminal" {
@@ -123,7 +141,6 @@ class TerminalSessionViewController: BaseTerminalSplitViewControllerChild {
         keyInput.keyboardToolbarHeightChanged = { [weak self] height in
             guard let self = self else { return }
             self.keyboardToolbarHeightChanged?(height)
-            // 调整边距防止键盘遮挡
             var insets = self.nativeTextView.contentInset
             insets.bottom = height
             self.nativeTextView.contentInset = insets
@@ -141,7 +158,7 @@ class TerminalSessionViewController: BaseTerminalSplitViewControllerChild {
     override func viewDidLoad() {
         super.viewDidLoad()
         
-        // 启动定时刷新 (0.1秒一次)
+        // 启动定时刷新
         startRefreshTimer()
 
         // 设置 HUD
@@ -155,45 +172,67 @@ class TerminalSessionViewController: BaseTerminalSplitViewControllerChild {
             hudView.centerYAnchor.constraint(equalTo: view.safeAreaLayoutGuide.centerYAnchor)
         ])
 
-        // 注册通知
         NotificationCenter.default.addObserver(self, selector: #selector(preferencesUpdated), name: Preferences.didChangeNotification, object: nil)
         
         // 注册快捷键
         addKeyCommand(UIKeyCommand(title: .localize("CLEAR_TERMINAL", comment: ""), image: UIImage(systemName: "text.badge.xmark"), action: #selector(clearTerminal), input: "k", modifierFlags: .command))
     }
     
+    // MARK: - Public Methods (修复 selector 找不到的问题)
+    
+    @objc func activatePasswordManager() {
+        keyInput.activatePasswordManager()
+    }
+    
+    @objc func clearTerminal() {
+        terminalController.clearTerminal()
+        nativeTextView.text = ""
+        lastTextContent = ""
+    }
+    
     // MARK: - 核心逻辑：定时同步屏幕
     
     func startRefreshTimer() {
         refreshTimer?.invalidate()
-        // 使用 Timer 轮询，保证即使 delegate 不回调，也能显示文字
         refreshTimer = Timer.scheduledTimer(withTimeInterval: 0.1, repeats: true) { [weak self] _ in
             self?.syncTerminalContent()
         }
     }
     
     func syncTerminalContent() {
+        // 如果无法通过 Mirror 获取到 terminal，尝试重新获取一次（防止初始化时机问题）
+        if rawTerminal == nil {
+            let mirror = Mirror(reflecting: terminalController)
+            for child in mirror.children {
+                if child.label == "terminal" {
+                    self.rawTerminal = child.value as? SwiftTerm.Terminal
+                    break
+                }
+            }
+        }
+        
         guard let terminal = self.rawTerminal else { return }
         
         // 获取所有行的数据
         let bufferLines = terminal.buffer.lines
         var fullText = ""
         
-        // 简单的文本拼接
+        // 文本拼接
         for i in 0..<bufferLines.count {
             let line = bufferLines[i]
             var lineStr = ""
             for j in 0..<line.count {
                 let char = line[j].getCharacter()
-                // 处理空字符，保持排版
                 if char == Character(UnicodeScalar(0)) {
                     lineStr.append(" ")
                 } else {
                     lineStr.append(char)
                 }
             }
-            // 去除行尾多余空格 (可选，看个人喜好)
-            // lineStr = lineStr.replacingOccurrences(of: "\\s+$", with: "", options: .regularExpression)
+            // 简单的 rtrim，避免换行问题
+             while lineStr.last == " " {
+                 lineStr.removeLast()
+             }
             fullText += lineStr + "\n"
         }
         
@@ -202,19 +241,10 @@ class TerminalSessionViewController: BaseTerminalSplitViewControllerChild {
             lastTextContent = fullText
             
             DispatchQueue.main.async {
-                // 检查是否在底部
                 let isAtBottom = self.nativeTextView.contentOffset.y >= (self.nativeTextView.contentSize.height - self.nativeTextView.bounds.height - 50)
                 
-                // 更新文本 (保留选中状态很难，但为了显示内容这是必须的)
-                // 如果用户正在选择文本，可以暂停更新，但这里为了简单先强制更新
-                if !self.nativeTextView.isFirstResponder { // 简单的防抖：如果正在操作键盘可能就不更新? 不，还是得更新
-                    self.nativeTextView.text = fullText
-                } else {
-                    // 尝试在更新时保留光标位置比较复杂，直接更新最稳妥
-                    self.nativeTextView.text = fullText
-                }
+                self.nativeTextView.text = fullText
                 
-                // 自动滚动
                 if isAtBottom {
                     let range = NSRange(location: self.nativeTextView.text.count - 1, length: 1)
                     self.nativeTextView.scrollRangeToVisible(range)
@@ -241,6 +271,15 @@ class TerminalSessionViewController: BaseTerminalSplitViewControllerChild {
         refreshTimer?.invalidate()
         keyInput.resignFirstResponder()
         terminalController.terminalWillDisappear()
+    }
+    
+    override func viewDidAppear(_ animated: Bool) {
+        super.viewDidAppear(animated)
+        if let initialCommand = initialCommand?.data(using: .utf8) {
+            terminalController.write(initialCommand + EscapeSequences.return)
+            // 确保写完后清空，防止重复写入
+            self.initialCommand = nil
+        }
     }
     
     override func viewWillLayoutSubviews() {
@@ -270,12 +309,6 @@ class TerminalSessionViewController: BaseTerminalSplitViewControllerChild {
         }
     }
 
-    @objc func clearTerminal() {
-        terminalController.clearTerminal()
-        nativeTextView.text = ""
-        lastTextContent = ""
-    }
-
     private func updateIsSplitViewResizing() {
         state.isSplitViewResizing = isSplitViewResizing
         if !isSplitViewResizing { updateScreenSize() }
@@ -297,8 +330,10 @@ class TerminalSessionViewController: BaseTerminalSplitViewControllerChild {
     }
 }
 
-// MARK: - Delegate (保留空实现以满足协议)
+// MARK: - Delegate (修复 Protocol Conformance 错误)
 extension TerminalSessionViewController: TerminalControllerDelegate {
+    
+    // 必须实现的方法
     func refresh(lines: inout [AnyView]) {}
     func refresh(lines: inout [BufferLine], cursor: (Int,Int)) {}
     func scroll(animated: Bool = false) {}
@@ -313,6 +348,13 @@ extension TerminalSessionViewController: TerminalControllerDelegate {
     func titleDidChange(_ title: String?, isDirty: Bool, hasBell: Bool) {
         let newTitle = title ?? .localize("TERMINAL", comment: "")
         delegate?.terminal(viewController: self, titleDidChange: newTitle, isDirty: isDirty, hasBell: hasBell)
+    }
+    
+    // 修复：添加 processDidExit
+    func processDidExit(exitCode: Int32) {
+        if let splitViewController = parent as? TerminalSplitViewController {
+            splitViewController.remove(viewController: self)
+        }
     }
 
     func currentFileDidChange(_ url: URL?, inWorkingDirectory workingDirectoryURL: URL?) {
@@ -334,7 +376,11 @@ extension TerminalSessionViewController: TerminalControllerDelegate {
         present(vc, animated: true)
     }
     
-    func didReceiveError(error: Error) {}
+    func didReceiveError(error: Error) {
+        let alert = UIAlertController(title: "Error", message: error.localizedDescription, preferredStyle: .alert)
+        alert.addAction(UIAlertAction(title: "OK", style: .cancel))
+        present(alert, animated: true)
+    }
 }
 
 extension TerminalSessionViewController: UIDocumentPickerDelegate {
