@@ -274,9 +274,13 @@ class TerminalSessionViewController: BaseTerminalSplitViewControllerChild {
         }
 
         let glyphSize = terminalController.fontMetrics.boundingBox
-        if glyphSize.width == 0 || glyphSize.height == 0 {
-            fatalError("Failed to get glyph size")
+        
+        // --- FIX: Prevent crash if glyph size is invalid ---
+        if glyphSize.width <= 0.1 || glyphSize.height <= 0.1 {
+            // Font metrics not ready yet, skip layout update
+            return
         }
+        // --------------------------------------------------
         
         // NSLog("NewTermLog: TerminalSessionViewController.updateScreenSize self=\(self.view.safeAreaLayoutGuide.layoutFrame) textView=\(textView.safeAreaLayoutGuide.layoutFrame)")
         let newSize = ScreenSize(cols: UInt16(layoutSize.width / glyphSize.width),
@@ -318,6 +322,11 @@ class TerminalSessionViewController: BaseTerminalSplitViewControllerChild {
               let cell = tableView.cellForRow(at: indexPath) else { return nil }
         
         let charWidth = terminalController.fontMetrics.boundingBox.width
+        
+        // --- FIX: Prevent crash if charWidth is 0 ---
+        if charWidth <= 0 { return nil }
+        // ------------------------------------------
+        
         // Adjust point to be relative to the cell's content view
         let localPoint = tableView.convert(point, to: cell.contentView)
         
