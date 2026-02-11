@@ -336,7 +336,8 @@ class TerminalSessionViewController: BaseTerminalSplitViewControllerChild {
         case .changed:
             // 长按移动时更新选区
             if let coord = getTerminalCoordinate(at: point) {
-                if coord != selectionEnd {
+                // 修复：分别比较属性，避免可选元组比较错误
+                if selectionEnd?.col != coord.col || selectionEnd?.row != coord.row {
                     selectionEnd = coord
                     tableView.reloadData()
                 }
@@ -359,7 +360,8 @@ class TerminalSessionViewController: BaseTerminalSplitViewControllerChild {
                 // 自动滚动支持：如果拖到顶部或底部
                 handleAutoScroll(at: point)
                 
-                if coord != selectionEnd {
+                // 修复：分别比较属性，避免可选元组比较错误
+                if selectionEnd?.col != coord.col || selectionEnd?.row != coord.row {
                     selectionEnd = coord
                     tableView.reloadData() // 实时重绘高亮
                 }
