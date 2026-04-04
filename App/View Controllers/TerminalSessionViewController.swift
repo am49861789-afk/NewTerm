@@ -79,11 +79,18 @@ class TerminalSessionViewController: BaseTerminalSplitViewControllerChild {
 
         // 👇 核心修改：使用 UITextView 替代 UITableView
         textView = UITextView()
+        // 🌟 让 textView 铺满整个屏幕
+        textView.frame = view.bounds
+        textView.autoresizingMask = [.flexibleWidth, .flexibleHeight]
+
         textView.isEditable = false
         textView.isSelectable = true
         textView.backgroundColor = .clear
         textView.textContainerInset = .zero
         textView.showsVerticalScrollIndicator = true
+
+        // 🌟 把 textView 真正贴到屏幕上
+        view.addSubview(textView)
 
         // 配置原有的点击手势，确保唤起软键盘
         textViewTapGestureRecognizer = UITapGestureRecognizer(target: self, action: #selector(self.handleTextViewTap(_:)))
@@ -97,6 +104,8 @@ class TerminalSessionViewController: BaseTerminalSplitViewControllerChild {
             self.keyboardToolbarHeightChanged?(height)
         }
         keyInput.terminalInputDelegate = terminalController
+
+        // 保持 keyInput 在最上层拦截输入事件
         view.addSubview(keyInput)
     }
 
@@ -310,21 +319,18 @@ class TerminalSessionViewController: BaseTerminalSplitViewControllerChild {
 
 extension TerminalSessionViewController: TerminalControllerDelegate {
 
-    func refresh(lines: inout [AnyView]) {
-        state.lines = lines
-        self.scroll()
-    }
-
     func refresh(lines: inout [BufferLine], cursor: (Int, Int)) {
         NSLog("NewTermLog: refresh lines=\(lines.count)")
         self.lines = lines
-        self.cursor = cursor
+
+        // 👇 修复 1：使用 .0 和 .1 来赋值
+        self.cursor = (x: cursor.0, y: cursor.1)
 
         let fullAttributedString = NSMutableAttributedString()
         for (index, line) in lines.enumerated() {
-            let cursorX = (index == cursor.y) ? cursor.x : -1
+            // 👇 修复 2：把 cursor.y 改成 cursor.1，cursor.x 改成 cursor.0
+            let cursorX = (index == cursor.1) ? cursor.0 : -1
 
-            // 👇 直接调用，去掉 if let，因为返回值一定有结果
             let lineAttrStr = terminalController.stringSupplier.buildNSAttributedString(line: line, cursorX: cursorX)
 
             fullAttributedString.append(lineAttrStr)
