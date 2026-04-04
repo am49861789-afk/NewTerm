@@ -153,24 +153,45 @@ open class StringSupplier {
 			}
 
 			// 2. 映射前景色和背景色 (返回 UIColor 对象)
-			let foreground = self.colorMap?.color(for: fgColor, isForeground: true, isBold: lastAttribute.style.contains(.bold), isCursor: isCursor) ?? UIColor.white
-			let background = self.colorMap?.color(for: bgColor, isForeground: false, isCursor: isCursor) ?? UIColor.black
+			let foreground = self.colorMap?.color(
+				for: fgColor,
+				isForeground: true,
+				isBold: lastAttribute.style.contains(.bold),
+				isCursor: isCursor
+			) ?? UIColor.white
+
+			let background = self.colorMap?.color(
+				for: bgColor,
+				isForeground: false,
+				isCursor: isCursor
+			) ?? UIColor.black
 
 			// 3. 映射字体
 			let font: UIFont
 			if lastAttribute.style.contains(.bold) || lastAttribute.style.contains(.blink) {
-				font = lastAttribute.style.contains(.italic) ? (self.fontMetrics?.boldItalicFont ?? .boldSystemFont(ofSize: 12)) : (self.fontMetrics?.boldFont ?? .boldSystemFont(ofSize: 12))
+				font = lastAttribute.style.contains(.italic)
+					? (self.fontMetrics?.boldItalicFont ?? .boldSystemFont(ofSize: 12))
+					: (self.fontMetrics?.boldFont ?? .boldSystemFont(ofSize: 12))
 			} else if lastAttribute.style.contains(.dim) {
-				font = lastAttribute.style.contains(.italic) ? (self.fontMetrics?.lightItalicFont ?? .systemFont(ofSize: 12)) : (self.fontMetrics?.lightFont ?? .systemFont(ofSize: 12))
+				font = lastAttribute.style.contains(.italic)
+					? (self.fontMetrics?.lightItalicFont ?? .systemFont(ofSize: 12))
+					: (self.fontMetrics?.lightFont ?? .systemFont(ofSize: 12))
 			} else {
-				font = lastAttribute.style.contains(.italic) ? (self.fontMetrics?.italicFont ?? .italicSystemFont(ofSize: 12)) : (self.fontMetrics?.regularFont ?? .systemFont(ofSize: 12))
+				font = lastAttribute.style.contains(.italic)
+					? (self.fontMetrics?.italicFont ?? .italicSystemFont(ofSize: 12))
+					: (self.fontMetrics?.regularFont ?? .systemFont(ofSize: 12))
 			}
+
+            // 👇 新增：创建一个严格的终端段落样式，禁止 UITextView 自作聪明地按单词换行
+            let paragraphStyle = NSMutableParagraphStyle()
+            paragraphStyle.lineBreakMode = .byClipping // 终端已经计算好换行了，直接裁剪多余像素，绝不二次换行
 
 			// 4. 打包原生属性字典
 			var attributes: [NSAttributedString.Key: Any] = [
 				.font: font,
 				.foregroundColor: foreground,
-				.backgroundColor: background
+				.backgroundColor: background,
+                .paragraphStyle: paragraphStyle // 👈 将段落样式加进字典里
 			]
 
 			// 5. 下划线与删除线
@@ -215,5 +236,4 @@ open class StringSupplier {
 
 		return result
 	}
-
 }
