@@ -46,7 +46,22 @@ public class Preferences: NSObject, ObservableObject {
 		willSet { objectWillChange.send() }
 	}
 
+	@Published var customBackgroundData: Data? {
+		didSet {
+			UserDefaults.standard.set(customBackgroundData, forKey: "customBackgroundData")
+		}
+	}
+
+	@Published var customBackgroundOpacity: Double {
+		didSet {
+			UserDefaults.standard.set(customBackgroundOpacity, forKey: "customBackgroundOpacity")
+		}
+	}
+
 	override init() {
+		self.customBackgroundData = UserDefaults.standard.data(forKey: "customBackgroundData")
+		self.customBackgroundOpacity = UserDefaults.standard.object(forKey: "customBackgroundOpacity") as? Double ?? 1.0
+
 		super.init()
 
 		if let version = Bundle.main.infoDictionary!["CFBundleVersion"] as? String {
@@ -199,4 +214,3 @@ public class Preferences: NSObject, ObservableObject {
 	}
 
 }
-
