@@ -46,13 +46,15 @@ public class Preferences: NSObject, ObservableObject {
 		willSet { objectWillChange.send() }
 	}
 
-	@Published var customBackgroundData: Data? {
+    // 已经在此处加上 public 修饰符，解决跨模块访问报错
+	@Published public var customBackgroundData: Data? {
 		didSet {
 			UserDefaults.standard.set(customBackgroundData, forKey: "customBackgroundData")
 		}
 	}
 
-	@Published var customBackgroundOpacity: Double {
+    // 已经在此处加上 public 修饰符，解决跨模块访问报错
+	@Published public var customBackgroundOpacity: Double {
 		didSet {
 			UserDefaults.standard.set(customBackgroundOpacity, forKey: "customBackgroundOpacity")
 		}
