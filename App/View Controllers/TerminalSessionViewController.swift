@@ -36,8 +36,8 @@ class TerminalTextView: UITextView {
     // 重写粘贴行为：不往文本框里塞，而是把文字发给终端
     override func paste(_ sender: Any?) {
         if let pasteString = UIPasteboard.general.string {
-            // 把剪贴板的文字当做键盘输入，写入给底层终端
-            terminalController?.write(pasteString)
+            // 把剪贴板的文字转成字节数组，发给底层终端
+            terminalController?.write(pasteString.utf8Array)
         }
     }
 }
