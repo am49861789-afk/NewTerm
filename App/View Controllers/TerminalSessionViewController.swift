@@ -302,7 +302,9 @@ class TerminalSessionViewController: BaseTerminalSplitViewControllerChild {
             screenSize = newSize
             delegate?.terminal(viewController: self, screenSizeDidChange: newSize)
         } else {
-            self.scroll(animated: true)
+            // 👇 核心修复 1：注释掉或者删除这里的滚动代码！
+            // 防止长按弹出菜单引起布局微调时，屏幕瞬间跳回最底部
+            // self.scroll(animated: true)
         }
     }
 
@@ -397,9 +399,16 @@ extension TerminalSessionViewController: TerminalControllerDelegate {
         state.scroll += 1
 
         guard self.textView.text.count > 0 else { return }
+        
+        // 👇 核心修复 2：加入“防打扰”拦截逻辑
+        // 如果当前有选中的文字，或者用户正在触摸/滑动屏幕，绝对禁止代码自动滚到底部！
+        if self.textView.selectedRange.length > 0 || self.textView.isTracking || self.textView.isDragging {
+            return
+        }
+        
         let bottom = NSMakeRange(self.textView.text.count - 1, 1)
         
-        // 👇 修复跳动核心：强制关闭自动滚动的动画过程，让文字瞬间触底
+        // 强制关闭自动滚动的动画过程，让文字瞬间触底
         UIView.performWithoutAnimation {
             self.textView.scrollRangeToVisible(bottom)
         }
