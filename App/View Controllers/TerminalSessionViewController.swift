@@ -319,16 +319,21 @@ class TerminalSessionViewController: BaseTerminalSplitViewControllerChild {
 
 extension TerminalSessionViewController: TerminalControllerDelegate {
 
+    // 👇 补回这个方法来满足 Protocol 协议的强制要求（哪怕我们里面什么都不干）
+    func refresh(lines: inout [AnyView]) {
+        state.lines = lines
+    }
+
+    // 下面保持你现在修改好的完美代码不变
     func refresh(lines: inout [BufferLine], cursor: (Int, Int)) {
         NSLog("NewTermLog: refresh lines=\(lines.count)")
         self.lines = lines
 
-        // 👇 修复 1：使用 .0 和 .1 来赋值
+        // 修复 1：使用 .0 和 .1 来赋值
         self.cursor = (x: cursor.0, y: cursor.1)
 
         let fullAttributedString = NSMutableAttributedString()
         for (index, line) in lines.enumerated() {
-            // 👇 修复 2：把 cursor.y 改成 cursor.1，cursor.x 改成 cursor.0
             let cursorX = (index == cursor.1) ? cursor.0 : -1
 
             let lineAttrStr = terminalController.stringSupplier.buildNSAttributedString(line: line, cursorX: cursorX)
