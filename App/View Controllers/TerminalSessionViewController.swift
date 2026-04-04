@@ -475,8 +475,15 @@ extension TerminalSessionViewController: UITableViewDataSource {
     func tableView(_ tableView: UITableView, cellForRowAt indexPath: IndexPath) -> UITableViewCell {
         let cell = SwiftUITableViewCell()
         let line = self.lines[indexPath.row]
-        let view = terminalController.stringSupplier.attributedString(line: line, cursorX: indexPath.row==cursor.y ? cursor.x : -1)
-        cell.configure(with: view)
+        let view = terminalController.stringSupplier.attributedString(line: line, cursorX: indexPath.row == cursor.y ? cursor.x : -1)
+        
+        if #available(iOS 15.0, *) {
+            // 通过 .textSelection(.enabled) 激活原生选中和复制器，并使用 AnyView 抹平类型
+            cell.configure(with: AnyView(view.textSelection(.enabled)))
+        } else {
+            cell.configure(with: view)
+        }
+        
         return cell
     }
     
