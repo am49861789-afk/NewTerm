@@ -38,6 +38,8 @@ struct SettingsView: View {
 	var presentationMode
 
 	@ObservedObject var preferences = Preferences.shared
+	
+	@State private var showingImagePicker = false
 
 	var windowScene: UIWindowScene?
 
@@ -98,6 +100,32 @@ struct SettingsView: View {
 					Toggle("Make haptic vibration", isOn: $preferences.bellVibrate)
 				}
 				Toggle("Show heads-up display", isOn: $preferences.bellHUD)
+			}
+
+			PreferencesGroup(header: Text("Custom Background"),
+											 footer: Text("Import a custom wallpaper for the terminal background.")) {
+				Button(action: {
+					self.showingImagePicker = true
+				}) {
+					Text("Import Wallpaper")
+				}
+				.sheet(isPresented: $showingImagePicker) {
+					ImagePicker(imageData: $preferences.customBackgroundData)
+				}
+				
+				if preferences.customBackgroundData != nil {
+					VStack(alignment: .leading, spacing: 8) {
+						Text("Background Opacity")
+						Slider(value: $preferences.customBackgroundOpacity, in: 0.0...1.0)
+					}
+					.padding(.vertical, 4)
+					
+					Button(action: {
+						preferences.customBackgroundData = nil
+					}) {
+						Text("Remove Wallpaper").foregroundColor(.red)
+					}
+				}
 			}
 
 			PreferencesGroup {
