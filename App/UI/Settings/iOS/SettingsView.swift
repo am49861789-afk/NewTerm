@@ -5,6 +5,7 @@
 //  Created by Adam Demasi on 3/4/21.
 //
 
+import UIKit
 import SwiftUI
 import CoreHaptics
 import NewTermCommon
@@ -38,12 +39,13 @@ struct SettingsView: View {
 	var presentationMode
 
 	@ObservedObject var preferences = Preferences.shared
-	
-	@State private var showingImagePicker = false
 
 	var windowScene: UIWindowScene?
 
 	@State private var keyboardToolbarState = KeyboardToolbarViewState()
+    
+    // 控制弹窗的状态
+	@State private var showingImagePicker = false
 
 	private func dismiss() {
 		if let windowScene = windowScene {
@@ -102,6 +104,7 @@ struct SettingsView: View {
 				Toggle("Show heads-up display", isOn: $preferences.bellHUD)
 			}
 
+            // 新增的自定义背景分区
 			PreferencesGroup(header: Text("Custom Background"),
 											 footer: Text("Import a custom wallpaper for the terminal background.")) {
 				Button(action: {
@@ -156,5 +159,39 @@ struct SettingsView: View {
 struct SettingsView_Previews: PreviewProvider {
 	static var previews: some View {
 		SettingsView()
+	}
+}
+
+// 直接把 ImagePicker 附在当前文件底部，解决缺少引用的问题
+struct ImagePicker: UIViewControllerRepresentable {
+	@Binding var imageData: Data?
+	@Environment(\.presentationMode) var presentationMode
+
+	func makeUIViewController(context: Context) -> UIImagePickerController {
+		let picker = UIImagePickerController()
+		picker.delegate = context.coordinator
+		picker.sourceType = .photoLibrary
+		return picker
+	}
+
+	func updateUIViewController(_ uiViewController: UIImagePickerController, context: Context) {}
+
+	func makeCoordinator() -> Coordinator {
+		Coordinator(self)
+	}
+
+	class Coordinator: NSObject, UINavigationControllerDelegate, UIImagePickerControllerDelegate {
+		let parent: ImagePicker
+
+		init(_ parent: ImagePicker) {
+			self.parent = parent
+		}
+
+		func imagePickerController(_ picker: UIImagePickerController, didFinishPickingMediaWithInfo info: [UIImagePickerController.InfoKey : Any]) {
+			if let uiImage = info[.originalImage] as? UIImage {
+				parent.imageData = uiImage.jpegData(compressionQuality: 0.8)
+			}
+			parent.presentationMode.wrappedValue.dismiss()
+		}
 	}
 }
