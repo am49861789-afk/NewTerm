@@ -131,4 +131,89 @@ open class StringSupplier {
 		)
 	}
 
+	// 👇 新增方法：用于为全局 UITextView 生成原生的 NSAttributedString
+	public func buildNSAttributedString(line: BufferLine, cursorX: Int) -> NSAttributedString {
+		let result = NSMutableAttributedString()
+		
+		var lastAttribute = Attribute.empty
+		var buffer = ""
+		
+		// 内部闭包：处理当前的文本切片，并附加上颜色和字体属性
+		let appendBufferToResult = { (isCursor: Bool) in
+			guard !buffer.isEmpty || isCursor else { return }
+			
+			var fgColor = lastAttribute.fg
+			var bgColor = lastAttribute.bg
+
+			// 1. 处理反转色
+			if lastAttribute.style.contains(.inverse) {
+				swap(&bgColor, &fgColor)
+				if fgColor == .defaultColor { fgColor = .defaultInvertedColor }
+				if bgColor == .defaultColor { bgColor = .defaultInvertedColor }
+			}
+
+			// 2. 映射前景色和背景色 (返回 UIColor 对象)
+			let foreground = self.colorMap?.color(for: fgColor, isForeground: true, isBold: lastAttribute.style.contains(.bold), isCursor: isCursor) ?? UIColor.white
+			let background = self.colorMap?.color(for: bgColor, isForeground: false, isCursor: isCursor) ?? UIColor.black
+
+			// 3. 映射字体
+			let font: UIFont
+			if lastAttribute.style.contains(.bold) || lastAttribute.style.contains(.blink) {
+				font = lastAttribute.style.contains(.italic) ? (self.fontMetrics?.boldItalicFont ?? .boldSystemFont(ofSize: 12)) : (self.fontMetrics?.boldFont ?? .boldSystemFont(ofSize: 12))
+			} else if lastAttribute.style.contains(.dim) {
+				font = lastAttribute.style.contains(.italic) ? (self.fontMetrics?.lightItalicFont ?? .systemFont(ofSize: 12)) : (self.fontMetrics?.lightFont ?? .systemFont(ofSize: 12))
+			} else {
+				font = lastAttribute.style.contains(.italic) ? (self.fontMetrics?.italicFont ?? .italicSystemFont(ofSize: 12)) : (self.fontMetrics?.regularFont ?? .systemFont(ofSize: 12))
+			}
+
+			// 4. 打包原生属性字典
+			var attributes: [NSAttributedString.Key: Any] = [
+				.font: font,
+				.foregroundColor: foreground,
+				.backgroundColor: background
+			]
+
+			// 5. 下划线与删除线
+			if lastAttribute.style.contains(.underline) {
+				attributes[.underlineStyle] = NSUnderlineStyle.single.rawValue
+			}
+			if lastAttribute.style.contains(.crossedOut) {
+				attributes[.strikethroughStyle] = NSUnderlineStyle.single.rawValue
+			}
+
+			// 如果是光标位置且为空，补充一个空格防止光标不可见
+			let textToAppend = (isCursor && buffer.isEmpty) ? " " : buffer
+			
+			result.append(NSAttributedString(string: textToAppend, attributes: attributes))
+		}
+
+		// 遍历该行终端字符，寻找颜色/样式的断点
+		for j in 0..<line.count {
+			let data = line[j]
+			let isCursor = cursorVisible && j == cursorX
+
+			// 遇到属性变化，或者遇到了光标，先结算之前的字符串
+			if isCursor || lastAttribute != data.attribute {
+				appendBufferToResult(false)
+				lastAttribute = data.attribute
+				buffer.removeAll()
+			}
+
+			let character = data.getCharacter()
+			// 终端中的 Null 字符替换为空格
+			buffer.append(character == "\0" ? " " : String(character))
+
+			// 单独结算光标
+			if isCursor {
+				appendBufferToResult(true)
+				buffer.removeAll()
+			}
+		}
+
+		// 遍历结束后，追加最后遗留的一段字符
+		appendBufferToResult(false)
+
+		return result
+	}
+
 }
