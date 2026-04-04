@@ -291,11 +291,21 @@ class TerminalSessionViewController: BaseTerminalSplitViewControllerChild {
     // MARK: - Gestures
 
     @objc private func handleTextViewTap(_ gestureRecognizer: UITapGestureRecognizer) {
-        if gestureRecognizer.state == .ended && !keyInput.isFirstResponder {
-            keyInput.becomeFirstResponder()
-            delegate?.terminalDidBecomeActive(viewController: self)
+        if gestureRecognizer.state == .ended {
+            
+            // 👇 修复：如果检测到当前有选中的文本，强制将选中范围清零
+            if textView.selectedRange.length > 0 {
+                textView.selectedRange = NSRange(location: 0, length: 0)
+            }
+            
+            // 正常唤起软键盘
+            if !keyInput.isFirstResponder {
+                keyInput.becomeFirstResponder()
+                delegate?.terminalDidBecomeActive(viewController: self)
+            }
         }
     }
+
 
     // MARK: - Lifecycle
 
