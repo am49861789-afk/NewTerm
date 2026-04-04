@@ -85,6 +85,7 @@ class TerminalSessionViewController: BaseTerminalSplitViewControllerChild {
         textView.textContainerInset = .zero
         textView.showsVerticalScrollIndicator = true
 
+        // 配置原有的点击手势，确保唤起软键盘
         textViewTapGestureRecognizer = UITapGestureRecognizer(target: self, action: #selector(self.handleTextViewTap(_:)))
         textViewTapGestureRecognizer.delegate = self
         textView.addGestureRecognizer(textViewTapGestureRecognizer)
@@ -118,17 +119,17 @@ class TerminalSessionViewController: BaseTerminalSplitViewControllerChild {
         ])
 
         addKeyCommand(UIKeyCommand(title: .localize("CLEAR_TERMINAL", comment: "VoiceOver label for a button that clears the terminal."),
-                                                             image: UIImage(systemName: "text.badge.xmark"),
-                                                             action: #selector(self.clearTerminal),
-                                                             input: "k",
-                                                             modifierFlags: .command))
+                                   image: UIImage(systemName: "text.badge.xmark"),
+                                   action: #selector(self.clearTerminal),
+                                   input: "k",
+                                   modifierFlags: .command))
 
         #if !targetEnvironment(macCatalyst)
         addKeyCommand(UIKeyCommand(title: .localize("PASSWORD_MANAGER", comment: "VoiceOver label for the password manager button."),
-                                                             image: UIImage(systemName: "key.fill"),
-                                                             action: #selector(self.activatePasswordManager),
-                                                             input: "f",
-                                                             modifierFlags: [ .command ]))
+                                   image: UIImage(systemName: "key.fill"),
+                                   action: #selector(self.activatePasswordManager),
+                                   input: "f",
+                                   modifierFlags: [.command]))
         #endif
 
         if UIApplication.shared.supportsMultipleScenes {
@@ -322,10 +323,12 @@ extension TerminalSessionViewController: TerminalControllerDelegate {
         let fullAttributedString = NSMutableAttributedString()
         for (index, line) in lines.enumerated() {
             let cursorX = (index == cursor.y) ? cursor.x : -1
-            if let lineAttrStr = terminalController.stringSupplier.buildNSAttributedString(line: line, cursorX: cursorX) {
-                fullAttributedString.append(lineAttrStr)
-                fullAttributedString.append(NSAttributedString(string: "\n"))
-            }
+
+            // 👇 直接调用，去掉 if let，因为返回值一定有结果
+            let lineAttrStr = terminalController.stringSupplier.buildNSAttributedString(line: line, cursorX: cursorX)
+
+            fullAttributedString.append(lineAttrStr)
+            fullAttributedString.append(NSAttributedString(string: "\n"))
         }
 
         self.textView.attributedText = fullAttributedString
