@@ -23,8 +23,22 @@ struct TerminalView: View {
 	static let verticalSpacing: CGFloat = isBigDevice ? 2 : 0
 
 	@EnvironmentObject private var state: TerminalState
+    @ObservedObject private var preferences = Preferences.shared
 
 	var body: some View {
+        let backgroundLayer = ZStack {
+            Color(state.colorMap.background)
+
+            if let bgData = preferences.customBackgroundData,
+               let bgImage = UIImage(data: bgData) {
+                Image(uiImage: bgImage)
+                    .resizable()
+                    .scaledToFill()
+                    .opacity(preferences.customBackgroundOpacity)
+                    .ignoresSafeArea()
+            }
+        }
+
 		let view = ScrollViewReader { scrollView in
 			ScrollView(.vertical, showsIndicators: true) {
 				LazyVStack(alignment: .leading, spacing: 0) {
@@ -36,9 +50,8 @@ struct TerminalView: View {
 				}
                 .padding(.vertical, Self.verticalSpacing)
                 .padding(.horizontal, Self.horizontalSpacing)
-                .background(Color(state.colorMap.background))
 			}
-            .background(Color(state.colorMap.background))
+            .background(backgroundLayer)
             .onChange(of: state.scroll, perform: { _ in
                 NSLog("NewTermLog: scrollTo \(state.lines.indices.last)")
                 scrollView.scrollTo(state.lines.indices.last, anchor: .bottom)
