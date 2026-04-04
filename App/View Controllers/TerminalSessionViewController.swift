@@ -13,6 +13,35 @@ import SwiftUIX
 import SwiftTerm
 import NewTermCommon
 
+// 👇 新增一个自定义的 UITextView 子类，专门用来破解 iOS 的菜单限制
+class TerminalTextView: UITextView {
+    
+    // 弱引用 controller，用来把粘贴的文字发送给终端进程
+    weak var terminalController: TerminalController?
+
+    // 重写这个方法：强制控制菜单显示什么选项
+    override func canPerformAction(_ action: Selector, withSender sender: Any?) -> Bool {
+        // 1. 强制显示“粘贴” (只要剪贴板里有文字)
+        if action == #selector(paste(_:)) {
+            return UIPasteboard.general.hasStrings
+        }
+        // 2. 强制显示“全选” (只要屏幕上有文字)
+        if action == #selector(selectAll(_:)) {
+            return self.text.count > 0
+        }
+        // 3. 其他默认操作 (比如“复制”) 交给系统原本的逻辑
+        return super.canPerformAction(action, withSender: sender)
+    }
+
+    // 重写粘贴行为：不往文本框里塞，而是把文字发给终端
+    override func paste(_ sender: Any?) {
+        if let pasteString = UIPasteboard.general.string {
+            // 把剪贴板的文字当做键盘输入，写入给底层终端
+            terminalController?.write(pasteString)
+        }
+    }
+}
+
 class TerminalSessionViewController: BaseTerminalSplitViewControllerChild {
 
     var keyboardToolbarHeightChanged: ((Double) -> Void)?
@@ -33,8 +62,8 @@ class TerminalSessionViewController: BaseTerminalSplitViewControllerChild {
     private var terminalController = TerminalController()
     private var keyInput = TerminalKeyInput(frame: .zero)
 
-    // 👇 使用原生 UITextView，支持跨行选中
-    private var textView: UITextView!
+    // 👇 把原本的 UITextView 换成我们的自定义类
+    private var textView: TerminalTextView!
     private var textViewTapGestureRecognizer: UITapGestureRecognizer!
 
     private var state = TerminalState()
@@ -77,8 +106,11 @@ class TerminalSessionViewController: BaseTerminalSplitViewControllerChild {
 
         preferencesUpdated()
 
-        // 👇 核心修改：使用 UITextView 替代 UITableView
-        textView = UITextView()
+        // 👇 核心修改：使用升级版的 TerminalTextView
+        textView = TerminalTextView()
+        // 将 terminalController 传给文本框，以便它能执行粘贴操作
+        textView.terminalController = self.terminalController
+
         // 🌟 让 textView 铺满整个屏幕
         textView.frame = view.bounds
         textView.autoresizingMask = [.flexibleWidth, .flexibleHeight]
@@ -88,6 +120,10 @@ class TerminalSessionViewController: BaseTerminalSplitViewControllerChild {
         textView.backgroundColor = .clear
         textView.textContainerInset = .zero
         textView.showsVerticalScrollIndicator = true
+
+        // 👇 新增两行：消除内部留白，强制同步排版计算，防止异步引发的跳动
+        textView.textContainer.lineFragmentPadding = 0
+        textView.layoutManager.allowsNonContiguousLayout = false
 
         // 🌟 把 textView 真正贴到屏幕上
         view.addSubview(textView)
@@ -334,25 +370,26 @@ extension TerminalSessionViewController: TerminalControllerDelegate {
         state.lines = lines
     }
 
-    // 下面保持你现在修改好的完美代码不变
     func refresh(lines: inout [BufferLine], cursor: (Int, Int)) {
         NSLog("NewTermLog: refresh lines=\(lines.count)")
         self.lines = lines
-
-        // 修复 1：使用 .0 和 .1 来赋值
         self.cursor = (x: cursor.0, y: cursor.1)
 
         let fullAttributedString = NSMutableAttributedString()
         for (index, line) in lines.enumerated() {
             let cursorX = (index == cursor.1) ? cursor.0 : -1
-
             let lineAttrStr = terminalController.stringSupplier.buildNSAttributedString(line: line, cursorX: cursorX)
-
             fullAttributedString.append(lineAttrStr)
             fullAttributedString.append(NSAttributedString(string: "\n"))
         }
 
+        // 👇 修复跳动核心：在塞入几万字之前，临时关闭滚动，塞完再开，能完美消除高度重置产生的跳跃
+        let wasScrollEnabled = self.textView.isScrollEnabled
+        self.textView.isScrollEnabled = false
+        
         self.textView.attributedText = fullAttributedString
+        
+        self.textView.isScrollEnabled = wasScrollEnabled
         self.scroll()
     }
 
@@ -361,7 +398,11 @@ extension TerminalSessionViewController: TerminalControllerDelegate {
 
         guard self.textView.text.count > 0 else { return }
         let bottom = NSMakeRange(self.textView.text.count - 1, 1)
-        self.textView.scrollRangeToVisible(bottom)
+        
+        // 👇 修复跳动核心：强制关闭自动滚动的动画过程，让文字瞬间触底
+        UIView.performWithoutAnimation {
+            self.textView.scrollRangeToVisible(bottom)
+        }
     }
 
     func activateBell() {
