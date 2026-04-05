@@ -26,9 +26,13 @@ struct TerminalView: View {
     @ObservedObject private var preferences = Preferences.shared
 
 	var body: some View {
-        let backgroundLayer = ZStack {
+        // 使用 ZStack 包裹最外层，完美兼容 iOS 15，确保背景不会发生层级错乱
+        ZStack {
+            // 1. 最底层：主题背景色
             Color(state.colorMap.background)
+                .ignoresSafeArea()
 
+            // 2. 壁纸层
             if let bgData = preferences.customBackgroundData,
                let bgImage = UIImage(data: bgData) {
                 Image(uiImage: bgImage)
@@ -37,36 +41,40 @@ struct TerminalView: View {
                     .opacity(preferences.customBackgroundOpacity)
                     .ignoresSafeArea()
             }
+
+            // 3. 终端文本层
+            let view = ScrollViewReader { scrollView in
+                ScrollView(.vertical, showsIndicators: true) {
+                    LazyVStack(alignment: .leading, spacing: 0) {
+                        ForEach(Array(zip(state.lines, state.lines.indices)), id: \.1) { line, i in
+                            line
+                                // 【关键修复】：将 opaque: true 改为 false，允许底下壁纸透出来
+                                .drawingGroup(opaque: false)
+                                .id(i)
+                        }
+                    }
+                    .padding(.vertical, Self.verticalSpacing)
+                    .padding(.horizontal, Self.horizontalSpacing)
+                }
+                .onChange(of: state.scroll, perform: { _ in
+                    NSLog("NewTermLog: scrollTo \(state.lines.indices.last)")
+                    scrollView.scrollTo(state.lines.indices.last, anchor: .bottom)
+                })
+            }
+            .opacity(state.isSplitViewResizing ? 0.6 : 1)
+            .animation(.linear(duration: 0.1), value: state.isSplitViewResizing)
+
+            // 4. API 版本兼容层：使用 Group 包裹视图并应用修饰符
+            Group {
+                if #available(iOS 16, *) {
+                    view.accessibilityTextContentType(.console).scrollDismissesKeyboard(.interactively)
+                } else if #available(iOS 15, *) {
+                    view.accessibilityTextContentType(.console)
+                } else {
+                    view
+                }
+            }
         }
-
-		let view = ScrollViewReader { scrollView in
-			ScrollView(.vertical, showsIndicators: true) {
-				LazyVStack(alignment: .leading, spacing: 0) {
-					ForEach(Array(zip(state.lines, state.lines.indices)), id: \.1) { line, i in
-						line
-							.drawingGroup(opaque: true)
-							.id(i)
-					}
-				}
-                .padding(.vertical, Self.verticalSpacing)
-                .padding(.horizontal, Self.horizontalSpacing)
-			}
-            .background(backgroundLayer)
-            .onChange(of: state.scroll, perform: { _ in
-                NSLog("NewTermLog: scrollTo \(state.lines.indices.last)")
-                scrollView.scrollTo(state.lines.indices.last, anchor: .bottom)
-            })
-		}
-        .opacity(state.isSplitViewResizing ? 0.6 : 1)
-        .animation(.linear(duration: 0.1), value: state.isSplitViewResizing)
-
-        if #available(iOS 16, *) {
-            view.accessibilityTextContentType(.console).scrollDismissesKeyboard(.interactively)
-        } else if #available(iOS 15, *) {
-            view.accessibilityTextContentType(.console)
-		} else {
-            view
-		}
 	}
 }
 
