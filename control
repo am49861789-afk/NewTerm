@@ -4,7 +4,7 @@ Depends: firmware (>= 14.0), zsh | bash | fish, coreutils, ncurses, system-cmds
 Recommends: gettext-localizations, iterm2-shell-integration, zsh-autosuggestions, zsh-syntax-highlighting
 Conflicts: ws.hbang.newterm, ws.hbang.newterm2
 Replaces: ws.hbang.newterm, ws.hbang.newterm2
-Version: 3.0~beta1
+Version: 999999.0~beta1
 Architecture: iphoneos-arm
 Description: Powerful terminal app for iOS
 Maintainer: HASHBANG Productions <support@hbang.ws>
