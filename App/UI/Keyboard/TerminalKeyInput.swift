@@ -27,7 +27,7 @@ extension ToolbarKey {
         case .Delete:   return EscapeSequences.Delete
 		case .fnKey(let index): return EscapeSequences.fn[index - 1]
 		case .fixedSpace, .variableSpace, .arrows,
-				 .control, .more, .fnKeys:
+             .control, .more, .fnKeys, .selectAll, .copy, .paste:
 			return []
 		}
 	}
@@ -416,6 +416,21 @@ extension TerminalKeyInput: KeyboardToolbarViewDelegate {
 		guard let terminalInputDelegate = terminalInputDelegate else {
 			return
 		}
+
+        if key == .selectAll {
+            if let tv = self.textView as? UITextView {
+                tv.selectAll(nil)
+            }
+            return
+        }
+        if key == .copy {
+            self.copy(nil)
+            return
+        }
+        if key == .paste {
+            self.paste(nil)
+            return
+        }
 
 		terminalInputDelegate.receiveKeyboardInput(data: key.keySequence(applicationCursor: terminalInputDelegate.applicationCursor))
         
