@@ -62,12 +62,8 @@ class TerminalSessionViewController: BaseTerminalSplitViewControllerChild {
     private var terminalController = TerminalController()
     private var keyInput = TerminalKeyInput(frame: .zero)
 
-    // 👇 使用自定义的 TerminalTextView
     private var textView: TerminalTextView!
-    
-    // 👇 新增：用于显示自定义背景的 ImageView
     private var backgroundImageView: UIImageView!
-    
     private var textViewTapGestureRecognizer: UITapGestureRecognizer!
 
     private var state = TerminalState()
@@ -111,7 +107,9 @@ class TerminalSessionViewController: BaseTerminalSplitViewControllerChild {
         // 👇 1. 初始化壁纸视图，将其垫在最下方
         backgroundImageView = UIImageView(frame: view.bounds)
         backgroundImageView.contentMode = .scaleAspectFill
-        backgroundImageView.autoresizingMask = [.flexibleWidth, .flexibleHeight]
+        backgroundImageView.clipsToBounds = true // 防止图片溢出边界
+        // 🚫【修复核心1】：不要加 autoresizingMask 的 flexibleHeight，否则图片会被键盘挤压
+        // backgroundImageView.autoresizingMask = [...] 被彻底移除
         view.addSubview(backgroundImageView)
         
         // 👇 2. 初始化 TextView
@@ -122,10 +120,7 @@ class TerminalSessionViewController: BaseTerminalSplitViewControllerChild {
 
         textView.isEditable = false
         textView.isSelectable = true
-        
-        // 【关键】：这里必须是 clear 才能透出底下的图片
         textView.backgroundColor = .clear 
-        
         textView.textContainerInset = .zero
         textView.showsVerticalScrollIndicator = true
 
@@ -243,6 +238,14 @@ class TerminalSessionViewController: BaseTerminalSplitViewControllerChild {
     override func viewWillLayoutSubviews() {
         NSLog("NewTermLog: TerminalSessionViewController.viewWillLayoutSubviews \(self.view.frame) \(self.view.safeAreaInsets)")
         super.viewWillLayoutSubviews()
+        
+        // 🚫【修复核心2】：手动控制壁纸尺寸！
+        // 强制壁纸高度等于物理屏幕的高度 (UIScreen.main.bounds.height)
+        // 这样不管键盘怎么把 view 往上挤，背景图的高度雷打不动，视觉上就绝对不会产生被挤压和移位的跳动。
+        if backgroundImageView != nil {
+            backgroundImageView.frame = CGRect(x: 0, y: 0, width: view.bounds.width, height: UIScreen.main.bounds.height)
+        }
+        
         updateScreenSize()
     }
 
@@ -366,11 +369,9 @@ class TerminalSessionViewController: BaseTerminalSplitViewControllerChild {
         state.fontMetrics = terminalController.fontMetrics
         state.colorMap = terminalController.colorMap
         
-        // 👇 核心逻辑：确保当前 Controller 的底色与主题同步
         self.view.backgroundColor = terminalController.colorMap.background
         self.textView?.backgroundColor = .clear
         
-        // 👇 从 Preferences 单例读取并渲染壁纸
         let preferences = Preferences.shared
         if let bgData = preferences.customBackgroundData,
            let bgImage = UIImage(data: bgData),
@@ -383,7 +384,6 @@ class TerminalSessionViewController: BaseTerminalSplitViewControllerChild {
             backgroundImageView.image = nil
         }
         
-        // 👇 强制刷新富文本内容，剥离可能遗留的黑色背景
         if textView?.attributedText != nil {
             var tempLines = self.lines
             refresh(lines: &tempLines, cursor: (self.cursor.x, self.cursor.y))
@@ -404,14 +404,12 @@ extension TerminalSessionViewController: TerminalControllerDelegate {
 
         let fullAttributedString = NSMutableAttributedString()
         
-        // 提取系统默认的背景颜色，用于稍后的“智能抠图”
         let defaultBgColor = terminalController.colorMap.background
 
         for (index, line) in lines.enumerated() {
             let cursorX = (index == cursor.1) ? cursor.0 : -1
             let lineAttrStr = terminalController.stringSupplier.buildNSAttributedString(line: line, cursorX: cursorX).mutableCopy() as! NSMutableAttributedString
             
-            // 👇 核心修复：遍历所有的文字背景色。如果发现是默认的黑底，强制剥离成透明！
             lineAttrStr.enumerateAttribute(.backgroundColor, in: NSRange(location: 0, length: lineAttrStr.length), options: []) { value, range, stop in
                 if let bgColor = value as? UIColor {
                     var r1: CGFloat = 0, g1: CGFloat = 0, b1: CGFloat = 0, a1: CGFloat = 0
@@ -419,7 +417,6 @@ extension TerminalSessionViewController: TerminalControllerDelegate {
                     bgColor.getRed(&r1, green: &g1, blue: &b1, alpha: &a1)
                     defaultBgColor.getRed(&r2, green: &g2, blue: &b2, alpha: &a2)
                     
-                    // 利用微小误差对比，确认为默认主题背景色后，将其删除
                     if abs(r1 - r2) < 0.05 && abs(g1 - g2) < 0.05 && abs(b1 - b2) < 0.05 {
                         lineAttrStr.removeAttribute(.backgroundColor, range: range)
                     }
