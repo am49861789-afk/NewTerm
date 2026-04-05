@@ -50,6 +50,7 @@ public class Preferences: NSObject, ObservableObject {
 	@Published public var customBackgroundData: Data? {
 		didSet {
 			UserDefaults.standard.set(customBackgroundData, forKey: "customBackgroundData")
+            NotificationCenter.default.post(name: Preferences.didChangeNotification, object: nil)
 		}
 	}
 
@@ -57,6 +58,7 @@ public class Preferences: NSObject, ObservableObject {
 	@Published public var customBackgroundOpacity: Double {
 		didSet {
 			UserDefaults.standard.set(customBackgroundOpacity, forKey: "customBackgroundOpacity")
+            NotificationCenter.default.post(name: Preferences.didChangeNotification, object: nil)
 		}
 	}
 
