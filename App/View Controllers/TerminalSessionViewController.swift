@@ -114,9 +114,6 @@ class TerminalSessionViewController: BaseTerminalSplitViewControllerChild {
         backgroundImageView.autoresizingMask = [.flexibleWidth, .flexibleHeight]
         view.addSubview(backgroundImageView)
         
-        // 此时刷新一次主题与壁纸状态
-        preferencesUpdated()
-
         // 👇 2. 初始化 TextView
         textView = TerminalTextView()
         textView.terminalController = self.terminalController
@@ -137,6 +134,9 @@ class TerminalSessionViewController: BaseTerminalSplitViewControllerChild {
 
         // 将 textView 盖在 backgroundImageView 之上
         view.addSubview(textView)
+        
+        // 此时刷新一次主题与壁纸状态
+        preferencesUpdated()
 
         // 配置原有的点击手势，确保唤起软键盘
         textViewTapGestureRecognizer = UITapGestureRecognizer(target: self, action: #selector(self.handleTextViewTap(_:)))
@@ -368,18 +368,25 @@ class TerminalSessionViewController: BaseTerminalSplitViewControllerChild {
         
         // 👇 核心逻辑：确保当前 Controller 的底色与主题同步
         self.view.backgroundColor = terminalController.colorMap.background
+        self.textView?.backgroundColor = .clear
         
         // 👇 从 Preferences 单例读取并渲染壁纸
         let preferences = Preferences.shared
         if let bgData = preferences.customBackgroundData,
            let bgImage = UIImage(data: bgData),
-           backgroundImageView != nil { // 防止初始调用时未实例化
+           backgroundImageView != nil { 
             
             backgroundImageView.image = bgImage
             backgroundImageView.alpha = preferences.customBackgroundOpacity
             
         } else if backgroundImageView != nil {
             backgroundImageView.image = nil
+        }
+        
+        // 👇 强制刷新富文本内容，剥离可能遗留的黑色背景
+        if textView?.attributedText != nil {
+            var tempLines = self.lines
+            refresh(lines: &tempLines, cursor: (self.cursor.x, self.cursor.y))
         }
     }
 }
@@ -396,9 +403,29 @@ extension TerminalSessionViewController: TerminalControllerDelegate {
         self.cursor = (x: cursor.0, y: cursor.1)
 
         let fullAttributedString = NSMutableAttributedString()
+        
+        // 提取系统默认的背景颜色，用于稍后的“智能抠图”
+        let defaultBgColor = terminalController.colorMap.background
+
         for (index, line) in lines.enumerated() {
             let cursorX = (index == cursor.1) ? cursor.0 : -1
-            let lineAttrStr = terminalController.stringSupplier.buildNSAttributedString(line: line, cursorX: cursorX)
+            let lineAttrStr = terminalController.stringSupplier.buildNSAttributedString(line: line, cursorX: cursorX).mutableCopy() as! NSMutableAttributedString
+            
+            // 👇 核心修复：遍历所有的文字背景色。如果发现是默认的黑底，强制剥离成透明！
+            lineAttrStr.enumerateAttribute(.backgroundColor, in: NSRange(location: 0, length: lineAttrStr.length), options: []) { value, range, stop in
+                if let bgColor = value as? UIColor {
+                    var r1: CGFloat = 0, g1: CGFloat = 0, b1: CGFloat = 0, a1: CGFloat = 0
+                    var r2: CGFloat = 0, g2: CGFloat = 0, b2: CGFloat = 0, a2: CGFloat = 0
+                    bgColor.getRed(&r1, green: &g1, blue: &b1, alpha: &a1)
+                    defaultBgColor.getRed(&r2, green: &g2, blue: &b2, alpha: &a2)
+                    
+                    // 利用微小误差对比，确认为默认主题背景色后，将其删除
+                    if abs(r1 - r2) < 0.05 && abs(g1 - g2) < 0.05 && abs(b1 - b2) < 0.05 {
+                        lineAttrStr.removeAttribute(.backgroundColor, range: range)
+                    }
+                }
+            }
+
             fullAttributedString.append(lineAttrStr)
             fullAttributedString.append(NSAttributedString(string: "\n"))
         }
