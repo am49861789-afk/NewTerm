@@ -62,8 +62,12 @@ class TerminalSessionViewController: BaseTerminalSplitViewControllerChild {
     private var terminalController = TerminalController()
     private var keyInput = TerminalKeyInput(frame: .zero)
 
-    // 👇 把原本的 UITextView 换成我们的自定义类
+    // 👇 使用自定义的 TerminalTextView
     private var textView: TerminalTextView!
+    
+    // 👇 新增：用于显示自定义背景的 ImageView
+    private var backgroundImageView: UIImageView!
+    
     private var textViewTapGestureRecognizer: UITapGestureRecognizer!
 
     private var state = TerminalState()
@@ -104,28 +108,34 @@ class TerminalSessionViewController: BaseTerminalSplitViewControllerChild {
 
         title = .localize("TERMINAL", comment: "Generic title displayed before the terminal sets a proper title.")
 
+        // 👇 1. 初始化壁纸视图，将其垫在最下方
+        backgroundImageView = UIImageView(frame: view.bounds)
+        backgroundImageView.contentMode = .scaleAspectFill
+        backgroundImageView.autoresizingMask = [.flexibleWidth, .flexibleHeight]
+        view.addSubview(backgroundImageView)
+        
+        // 此时刷新一次主题与壁纸状态
         preferencesUpdated()
 
-        // 👇 核心修改：使用升级版的 TerminalTextView
+        // 👇 2. 初始化 TextView
         textView = TerminalTextView()
-        // 将 terminalController 传给文本框，以便它能执行粘贴操作
         textView.terminalController = self.terminalController
-
-        // 🌟 让 textView 铺满整个屏幕
         textView.frame = view.bounds
         textView.autoresizingMask = [.flexibleWidth, .flexibleHeight]
 
         textView.isEditable = false
         textView.isSelectable = true
-        textView.backgroundColor = .clear
+        
+        // 【关键】：这里必须是 clear 才能透出底下的图片
+        textView.backgroundColor = .clear 
+        
         textView.textContainerInset = .zero
         textView.showsVerticalScrollIndicator = true
 
-        // 👇 新增两行：消除内部留白，强制同步排版计算，防止异步引发的跳动
         textView.textContainer.lineFragmentPadding = 0
         textView.layoutManager.allowsNonContiguousLayout = false
 
-        // 🌟 把 textView 真正贴到屏幕上
+        // 将 textView 盖在 backgroundImageView 之上
         view.addSubview(textView)
 
         // 配置原有的点击手势，确保唤起软键盘
@@ -141,7 +151,6 @@ class TerminalSessionViewController: BaseTerminalSplitViewControllerChild {
         }
         keyInput.terminalInputDelegate = terminalController
 
-        // 保持 keyInput 在最上层拦截输入事件
         view.addSubview(keyInput)
     }
 
@@ -240,7 +249,7 @@ class TerminalSessionViewController: BaseTerminalSplitViewControllerChild {
     override func viewDidLayoutSubviews() {
         super.viewDidLayoutSubviews()
         NSLog("NewTermLog: TerminalSessionViewController.viewDidLayoutSubviews \(self.view.frame) \(self.view.safeAreaInsets)")
-        NSLog("NewTermLog: textView frame=\(self.textView.frame) safeArea=\(self.textView.safeAreaInsets)")
+        NSLog("NewTermLog: textView frame=\(self.textView?.frame ?? .zero) safeArea=\(self.textView?.safeAreaInsets ?? .zero)")
     }
 
     override func viewSafeAreaInsetsDidChange() {
@@ -301,10 +310,6 @@ class TerminalSessionViewController: BaseTerminalSplitViewControllerChild {
         if screenSize != newSize {
             screenSize = newSize
             delegate?.terminal(viewController: self, screenSizeDidChange: newSize)
-        } else {
-            // 👇 核心修复 1：注释掉或者删除这里的滚动代码！
-            // 防止长按弹出菜单引起布局微调时，屏幕瞬间跳回最底部
-            // self.scroll(animated: true)
         }
     }
 
@@ -331,12 +336,10 @@ class TerminalSessionViewController: BaseTerminalSplitViewControllerChild {
     @objc private func handleTextViewTap(_ gestureRecognizer: UITapGestureRecognizer) {
         if gestureRecognizer.state == .ended {
             
-            // 👇 修复：如果检测到当前有选中的文本，强制将选中范围清零
             if textView.selectedRange.length > 0 {
                 textView.selectedRange = NSRange(location: 0, length: 0)
             }
             
-            // 正常唤起软键盘
             if !keyInput.isFirstResponder {
                 keyInput.becomeFirstResponder()
                 delegate?.terminalDidBecomeActive(viewController: self)
@@ -362,12 +365,27 @@ class TerminalSessionViewController: BaseTerminalSplitViewControllerChild {
     @objc private func preferencesUpdated() {
         state.fontMetrics = terminalController.fontMetrics
         state.colorMap = terminalController.colorMap
+        
+        // 👇 核心逻辑：确保当前 Controller 的底色与主题同步
+        self.view.backgroundColor = terminalController.colorMap.background
+        
+        // 👇 从 Preferences 单例读取并渲染壁纸
+        let preferences = Preferences.shared
+        if let bgData = preferences.customBackgroundData,
+           let bgImage = UIImage(data: bgData),
+           backgroundImageView != nil { // 防止初始调用时未实例化
+            
+            backgroundImageView.image = bgImage
+            backgroundImageView.alpha = preferences.customBackgroundOpacity
+            
+        } else if backgroundImageView != nil {
+            backgroundImageView.image = nil
+        }
     }
 }
 
 extension TerminalSessionViewController: TerminalControllerDelegate {
 
-    // 👇 补回这个方法来满足 Protocol 协议的强制要求（哪怕我们里面什么都不干）
     func refresh(lines: inout [AnyView]) {
         state.lines = lines
     }
@@ -385,7 +403,6 @@ extension TerminalSessionViewController: TerminalControllerDelegate {
             fullAttributedString.append(NSAttributedString(string: "\n"))
         }
 
-        // 👇 修复跳动核心：在塞入几万字之前，临时关闭滚动，塞完再开，能完美消除高度重置产生的跳跃
         let wasScrollEnabled = self.textView.isScrollEnabled
         self.textView.isScrollEnabled = false
         
@@ -400,15 +417,12 @@ extension TerminalSessionViewController: TerminalControllerDelegate {
 
         guard self.textView.text.count > 0 else { return }
         
-        // 👇 核心修复 2：加入“防打扰”拦截逻辑
-        // 如果当前有选中的文字，或者用户正在触摸/滑动屏幕，绝对禁止代码自动滚到底部！
         if self.textView.selectedRange.length > 0 || self.textView.isTracking || self.textView.isDragging {
             return
         }
         
         let bottom = NSMakeRange(self.textView.text.count - 1, 1)
         
-        // 强制关闭自动滚动的动画过程，让文字瞬间触底
         UIView.performWithoutAnimation {
             self.textView.scrollRangeToVisible(bottom)
         }
