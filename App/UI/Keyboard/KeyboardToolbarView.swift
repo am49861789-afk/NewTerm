@@ -30,7 +30,7 @@ enum Toolbar: CaseIterable {
 		switch self {
 		case .primary:
 			return [
-                .control, .escape, .tab, .Delete, .selectAll, .copy, .paste,
+				.control, .escape, .tab, .Delete, .copy, .paste,
 				.variableSpace(id: 0),
 				.arrows
 			]
@@ -64,7 +64,7 @@ enum ToolbarKey: Hashable {
 	case variableSpace(id: Int)
 	case arrows
 	// Primary - leading
-	case control, escape, tab, more, Delete, selectAll, copy, paste
+	case control, escape, tab, more, Delete, copy, paste
 	// Primary - trailing
 	case up, down, left, right
 	// Secondary - navigation
@@ -99,7 +99,6 @@ enum ToolbarKey: Hashable {
                                                                  glyph: .localize("Del"),
                                                                  imageName: .deleteRight,
                                                                  preferredStyle: .icons)
-		case .selectAll: return Key(label: "全部选中", minWidth: 45)
 		case .copy:      return Key(label: "复制", minWidth: 40)
 		case .paste:     return Key(label: "粘贴", minWidth: 40)
 
