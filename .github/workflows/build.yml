@@ -34,12 +34,12 @@ jobs:
           fi
 
       # --------------------------------------------------------
-      # [新增]: 动态剥离 Roothide 依赖，保证有根和标准无根环境的纯净
+      # [修复]: 修正了 echo 语句中的 bad substitution 语法错误
       # --------------------------------------------------------
       - name: Patch out Roothide for Rootful and Rootless
         run: |
           if [ "${{ matrix.scheme }}" != "roothide" ]; then
-            echo "==> Patching roothide dependencies out for ${matrix.scheme}..."
+            echo "==> Patching roothide dependencies out for ${{ matrix.scheme }}..."
             
             # 1. 覆写 roothide.h 为原路返回的宏，防止硬编码导致路径被重定向到 /var/jb/
             echo "#define jbroot(path) path" > roothide.h
