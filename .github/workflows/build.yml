@@ -5,8 +5,14 @@ on:
 
 jobs:
   build:
-    name: Build
+    name: Build (${{ matrix.scheme }})
     runs-on: macos-14
+    strategy:
+      matrix:
+        # 定义三种越狱环境：rootful（有根）、rootless（标准无根）、roothide（Roothide无根）
+        scheme: [rootful, rootless, roothide]
+      fail-fast: false
+
     steps:
       - name: Checkout
         uses: actions/checkout@v4
@@ -19,16 +25,33 @@ jobs:
           cache-path: ~/__cache
 
       - name: Set up Theos
-        run: git clone --recursive --depth=1 'https://github.com/roothide/theos.git' ~/theos
+        run: |
+          # Roothide 需要使用他们专门分叉修改的 Theos，而标准无根/有根使用官方 Theos 即可
+          if [ "${{ matrix.scheme }}" = "roothide" ]; then
+            git clone --recursive --depth=1 'https://github.com/roothide/theos.git' ~/theos
+          else
+            git clone --recursive --depth=1 'https://github.com/theos/theos.git' ~/theos
+          fi
 
       - name: Compile
         id: package_build
         run: |
-          gmake package THEOS=~/theos ROOTHIDE=1
+          # 统一指定架构为 arm64 和 arm64e
+          export ARCHS="arm64 arm64e"
+          
+          if [ "${{ matrix.scheme }}" = "rootful" ]; then
+            gmake package THEOS=~/theos
+          elif [ "${{ matrix.scheme }}" = "rootless" ]; then
+            gmake package THEOS=~/theos THEOS_PACKAGE_SCHEME=rootless
+          elif [ "${{ matrix.scheme }}" = "roothide" ]; then
+            gmake package THEOS=~/theos ROOTHIDE=1
+          fi
+          
           echo "package=$(cat .theos/last_package)" >> $GITHUB_OUTPUT
 
       - name: Upload a Build Artifact
         uses: actions/upload-artifact@v4
         with:
-          name: NewTerm3
+          # 动态命名 Artifact，防止三种包在上传时互相覆盖
+          name: NewTerm3-${{ matrix.scheme }}
           path: '${{ steps.package_build.outputs.package }}'
