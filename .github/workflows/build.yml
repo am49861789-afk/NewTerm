@@ -34,16 +34,20 @@ jobs:
           fi
 
       # --------------------------------------------------------
-      # [修复]: 修正了 echo 语句中的 bad substitution 语法错误
+      # [修复]: 将宏定义改为 Objective-C 内联函数，以支持 Swift 桥接调用
       # --------------------------------------------------------
       - name: Patch out Roothide for Rootful and Rootless
         run: |
           if [ "${{ matrix.scheme }}" != "roothide" ]; then
             echo "==> Patching roothide dependencies out for ${{ matrix.scheme }}..."
             
-            # 1. 覆写 roothide.h 为原路返回的宏，防止硬编码导致路径被重定向到 /var/jb/
-            echo "#define jbroot(path) path" > roothide.h
-            echo "#define rootfs(path) path" >> roothide.h
+            # 1. 覆写 roothide.h 为静态内联函数，Swift 能够完美导入并解析
+            cat << 'EOF' > roothide.h
+            #import <Foundation/Foundation.h>
+            
+            static inline NSString * jbroot(NSString *path) { return path; }
+            static inline NSString * rootfs(NSString *path) { return path; }
+            EOF
             
             # 2. 扫描并移除所有 Makefile 中的 -lroothide 链接标志，防止 dyld 闪退
             find . -name "Makefile" -exec sed -i '' 's/-lroothide//g' {} +
