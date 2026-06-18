@@ -33,6 +33,25 @@ jobs:
             git clone --recursive --depth=1 'https://github.com/theos/theos.git' ~/theos
           fi
 
+      # --------------------------------------------------------
+      # [新增]: 动态剥离 Roothide 依赖，保证有根和标准无根环境的纯净
+      # --------------------------------------------------------
+      - name: Patch out Roothide for Rootful and Rootless
+        run: |
+          if [ "${{ matrix.scheme }}" != "roothide" ]; then
+            echo "==> Patching roothide dependencies out for ${matrix.scheme}..."
+            
+            # 1. 覆写 roothide.h 为原路返回的宏，防止硬编码导致路径被重定向到 /var/jb/
+            echo "#define jbroot(path) path" > roothide.h
+            echo "#define rootfs(path) path" >> roothide.h
+            
+            # 2. 扫描并移除所有 Makefile 中的 -lroothide 链接标志，防止 dyld 闪退
+            find . -name "Makefile" -exec sed -i '' 's/-lroothide//g' {} +
+            
+            # 3. 移除可能强制开启的 ROOTHIDE=1 宏
+            find . -name "Makefile" -exec sed -i '' 's/-DROOTHIDE=1//g' {} +
+          fi
+
       - name: Compile
         id: package_build
         run: |
