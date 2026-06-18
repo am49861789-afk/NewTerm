@@ -34,17 +34,22 @@ jobs:
           fi
 
       # --------------------------------------------------------
-      # [终极修复]: 生成标准 C 语言字符指针的降级兼容头文件，不影响任何原生业务代码
+      # [完美适配]: 利用 Clang 重载特性，生成支持所有类型的占位代码
       # --------------------------------------------------------
       - name: Patch out Roothide for Rootful and Rootless
         run: |
           if [ "${{ matrix.scheme }}" != "roothide" ]; then
             echo "==> Patching roothide dependencies out for ${{ matrix.scheme }}..."
             
-            # 1. 使用标准 C 语言字符指针 (char *) 进行占位，完美契合 Swift 的 cString 转换机制
-            echo '#include <string.h>' > roothide.h
-            echo 'static inline char * jbroot(const char *path) { return (char *)path; }' >> roothide.h
-            echo 'static inline char * rootfs(const char *path) { return (char *)path; }' >> roothide.h
+            # 1. 覆写 roothide.h，利用 __attribute__((overloadable)) 实现 C 语言级函数重载。
+            # 这能让 Swift 桥接时自动生成支持 String、char * 和 const char * 的多个函数版本，满足不同行的业务代码调用。
+            echo '#import <Foundation/Foundation.h>' > roothide.h
+            echo '__attribute__((overloadable)) static inline NSString * jbroot(NSString *path) { return path; }' >> roothide.h
+            echo '__attribute__((overloadable)) static inline char * jbroot(char *path) { return path; }' >> roothide.h
+            echo '__attribute__((overloadable)) static inline const char * jbroot(const char *path) { return path; }' >> roothide.h
+            echo '__attribute__((overloadable)) static inline NSString * rootfs(NSString *path) { return path; }' >> roothide.h
+            echo '__attribute__((overloadable)) static inline char * rootfs(char *path) { return path; }' >> roothide.h
+            echo '__attribute__((overloadable)) static inline const char * rootfs(const char *path) { return path; }' >> roothide.h
             
             # 2. 扫描并移除所有 Makefile 中的 -lroothide 链接标志，防止 dyld 闪退
             find . -name "Makefile" -exec sed -i '' 's/-lroothide//g' {} +
