@@ -34,17 +34,17 @@ jobs:
           fi
 
       # --------------------------------------------------------
-      # [修复]: 放弃 Heredoc (EOF)，改用逐行 echo，彻底解决缩进导致的语法错误
+      # [终极修复]: 生成标准 C 语言字符指针的降级兼容头文件，不影响任何原生业务代码
       # --------------------------------------------------------
       - name: Patch out Roothide for Rootful and Rootless
         run: |
           if [ "${{ matrix.scheme }}" != "roothide" ]; then
             echo "==> Patching roothide dependencies out for ${{ matrix.scheme }}..."
             
-            # 1. 覆写 roothide.h 为静态内联函数，使用 echo 避免任何缩进引起的崩溃
-            echo '#import <Foundation/Foundation.h>' > roothide.h
-            echo 'static inline NSString * jbroot(NSString *path) { return path; }' >> roothide.h
-            echo 'static inline NSString * rootfs(NSString *path) { return path; }' >> roothide.h
+            # 1. 使用标准 C 语言字符指针 (char *) 进行占位，完美契合 Swift 的 cString 转换机制
+            echo '#include <string.h>' > roothide.h
+            echo 'static inline char * jbroot(const char *path) { return (char *)path; }' >> roothide.h
+            echo 'static inline char * rootfs(const char *path) { return (char *)path; }' >> roothide.h
             
             # 2. 扫描并移除所有 Makefile 中的 -lroothide 链接标志，防止 dyld 闪退
             find . -name "Makefile" -exec sed -i '' 's/-lroothide//g' {} +
